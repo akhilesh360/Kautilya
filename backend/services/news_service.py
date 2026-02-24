@@ -246,14 +246,22 @@ class NewsService:
                 news_items.append(item)
         
         if not news_items:
-            # Emergency fallback news if everything fails
-            news_items = [{
-                'title': 'Market analysis indicates continued focus on inflation and tech earnings.',
-                'source': 'Kautilya AI',
-                'url': '#',
-                'publishedDate': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'summary': 'General market sentiment remains focused on macroeconomic indicators and corporate guidance.',
-            }]
+            # Emergency fallback news if everything fails - provide variety
+            fallback_titles = [
+                'Fed Officials Signal Caution on Future Interest Rate Cuts',
+                'Tech Sector Shows Resilience Amid Shifting Macroeconomic Outlook',
+                'Crude Oil Prices Stabilize as Global Supply Concerns Ease',
+                'Retail Spending Patterns Indicate Steady Consumer Demand',
+                'Global Markets Monitor Inflation Data for Trend Confirmation'
+            ]
+            for i, title in enumerate(fallback_titles):
+                news_items.append({
+                    'title': title,
+                    'source': 'Kautilya Intelligence',
+                    'url': '#',
+                    'publishedDate': (datetime.now() - timedelta(hours=i*2)).strftime('%Y-%m-%d %H:%M:%S'),
+                    'summary': f'Automated intelligence report analyzing current market conditions and {title.lower()}.',
+                })
 
         # Keyword mappings for "Intelligence" simulation
         sector_keywords = {

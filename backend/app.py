@@ -86,7 +86,7 @@ def analyze(symbol):
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             # Task definitions
             future_info = executor.submit(stock_service.get_company_info, symbol)
-            future_hist = executor.submit(stock_service.get_historical_prices, symbol, period="5y")
+            future_hist = executor.submit(stock_service.get_historical_prices, symbol, period="2y")
             future_fin = executor.submit(stock_service.get_quarterly_financials, symbol)
             future_inst = executor.submit(stock_service.get_institutional_holders, symbol)
             future_insider = executor.submit(stock_service.get_insider_transactions, symbol)

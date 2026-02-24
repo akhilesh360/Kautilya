@@ -36,21 +36,11 @@ class StockDataService:
     """Service for fetching and processing stock market data."""
 
     def __init__(self):
-        self._ticker_cache = {}
         self._result_cache = {}
 
     def _get_ticker(self, symbol: str) -> yf.Ticker:
-        """Get a yfinance Ticker."""
-        if symbol not in self._ticker_cache:
-            ticker = yf.Ticker(symbol)
-            self._ticker_cache[symbol] = ticker
-        return self._ticker_cache[symbol]
-
-    def _fresh_ticker(self, symbol: str) -> yf.Ticker:
-        """Force-create a fresh Ticker."""
-        ticker = yf.Ticker(symbol)
-        self._ticker_cache[symbol] = ticker
-        return ticker
+        """Get a fresh yfinance Ticker (isolated for multi-threading)."""
+        return yf.Ticker(symbol)
 
     def search_stock(self, query: str) -> List[Dict[str, str]]:
         """Search for stocks by name or ticker symbol."""
@@ -210,11 +200,10 @@ class StockDataService:
             'numberOfAnalystOpinions': 0,
         }
 
-        # Use yf.download()
+        # Use a single yf.download() for 1y to get current price and 52-week range
         try:
-            df = yf.download(symbol, period="5d", progress=False, auto_adjust=True)
+            df = yf.download(symbol, period="1y", progress=False, auto_adjust=True)
             if df is not None and not df.empty:
-                # Handle MultiIndex columns
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
 
@@ -227,21 +216,12 @@ class StockDataService:
                 result['dayLow'] = round(float(last.get('Low', 0)), 2)
                 result['dayHigh'] = round(float(last.get('High', 0)), 2)
                 result['volume'] = int(last.get('Volume', 0))
+                result['fiftyTwoWeekLow'] = round(float(df['Low'].min()), 2)
+                result['fiftyTwoWeekHigh'] = round(float(df['High'].max()), 2)
 
-                logger.info(f"[{symbol}] Got price from yf.download: ${result['currentPrice']}")
+                logger.info(f"[{symbol}] Got core metrics from yf.download (1y)")
         except Exception as e:
-            logger.warning(f"[{symbol}] yf.download for base price failed: {e}")
-
-        # Try to get 52-week range from 1y data
-        try:
-            df_1y = yf.download(symbol, period="1y", progress=False, auto_adjust=True)
-            if df_1y is not None and not df_1y.empty:
-                if isinstance(df_1y.columns, pd.MultiIndex):
-                    df_1y.columns = df_1y.columns.get_level_values(0)
-                result['fiftyTwoWeekLow'] = round(float(df_1y['Low'].min()), 2)
-                result['fiftyTwoWeekHigh'] = round(float(df_1y['High'].max()), 2)
-        except Exception as e:
-            logger.debug(f"[{symbol}] 52-week range fetch failed: {e}")
+            logger.warning(f"[{symbol}] yf.download core metrics failed: {e}")
 
         return result
 
