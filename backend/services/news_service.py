@@ -287,70 +287,80 @@ class NewsService:
         ]
         
         for item in news_items:
-            title = item['title']
-            raw_summary = item['summary']
-            
-            # Clean summary from HTML
-            clean_summary = BeautifulSoup(raw_summary, "html.parser").get_text(separator=" ").strip()
-            
-            # Extract 2-sentence summary
-            tb_summary = TextBlob(clean_summary)
-            if tb_summary.sentences:
-                short_summary = " ".join(str(s) for s in tb_summary.sentences[:2])
-            else:
-                short_summary = clean_summary[:150]
+            try:
+                title = item.get('title', 'Market Update')
+                raw_summary = item.get('summary', '') or ''
                 
-            # Fallback if summary is empty or just repeats title
-            if not short_summary or title.lower() in short_summary.lower():
-                short_summary = f"Recent financial update surrounding {title}."
-            
-            # Identify sectors based on title AND the new clean summary
-            identified_sectors = []
-            for sector, keywords in sector_keywords.items():
-                # Use regex \b to avoid substring matches like "ai" in "said"
-                if any(re.search(rf'\b{re.escape(k)}\b', title.lower()) or re.search(rf'\b{re.escape(k)}\b', clean_summary.lower()) for k in keywords):
-                    identified_sectors.append(sector)
-            
-            if not identified_sectors:
-                identified_sectors = ['General Market']
+                # Clean summary from HTML safely
+                if raw_summary:
+                    clean_summary = BeautifulSoup(raw_summary, "html.parser").get_text(separator=" ").strip()
+                else:
+                    clean_summary = ""
+                
+                # Extract 2-sentence summary
+                if clean_summary:
+                    tb_summary = TextBlob(clean_summary)
+                    if hasattr(tb_summary, 'sentences') and tb_summary.sentences:
+                        short_summary = " ".join(str(s) for s in tb_summary.sentences[:2])
+                    else:
+                        short_summary = clean_summary[:150]
+                else:
+                    short_summary = ""
+                    
+                # Fallback if summary is empty or just repeats title
+                if not short_summary or title.lower() in short_summary.lower():
+                    short_summary = f"Recent financial update surrounding {title}."
+                
+                # Identify sectors based on title AND the new clean summary
+                identified_sectors = []
+                for sector, keywords in sector_keywords.items():
+                    # Use regex \b to avoid substring matches like "ai" in "said"
+                    if any(re.search(rf'\b{re.escape(k)}\b', title.lower()) or re.search(rf'\b{re.escape(k)}\b', clean_summary.lower()) for k in keywords):
+                        identified_sectors.append(sector)
+                
+                if not identified_sectors:
+                    identified_sectors = ['General Market']
 
-            # Determine sentiment
-            blob = TextBlob(f"{title} {short_summary}")
-            sentiment_val = blob.sentiment.polarity
-            sentiment = "positive" if sentiment_val >= 0 else "negative"
-            
-            # Override with explicit negative keywords using word boundaries
-            if any(re.search(rf'\b{re.escape(word)}\b', title.lower()) or re.search(rf'\b{re.escape(word)}\b', short_summary.lower()) for word in negative_keywords):
-                sentiment = "negative"
+                # Determine sentiment
+                blob = TextBlob(f"{title} {short_summary}")
+                sentiment_val = blob.sentiment.polarity
+                sentiment = "positive" if sentiment_val >= 0 else "negative"
+                
+                # Override with explicit negative keywords using word boundaries
+                if any(re.search(rf'\b{re.escape(word)}\b', title.lower()) or re.search(rf'\b{re.escape(word)}\b', short_summary.lower()) for word in negative_keywords):
+                    sentiment = "negative"
 
-            # Identify potential stocks based on matched sectors specifically
-            suggested_stocks_pool = []
-            
-            if 'General Market' in identified_sectors:
-                # Provide a mix of large caps
-                suggested_stocks_pool = ['SPY', 'QQQ', 'DIA']
-            else:
-                for sector in identified_sectors:
-                    stocks = stock_keywords.get(sector, [])
-                    suggested_stocks_pool.extend(stocks)
-            
-            # Remove duplicates
-            suggested_stocks_pool = list(set(suggested_stocks_pool))
-            
-            # Dynamically select up to 3 random distinct stocks from the relevant pool
-            num_to_select = min(3, len(suggested_stocks_pool))
-            suggested_stocks = random.sample(suggested_stocks_pool, num_to_select)
+                # Identify potential stocks based on matched sectors specifically
+                suggested_stocks_pool = []
+                
+                if 'General Market' in identified_sectors:
+                    # Provide a mix of large caps
+                    suggested_stocks_pool = ['SPY', 'QQQ', 'DIA']
+                else:
+                    for sector in identified_sectors:
+                        stocks = stock_keywords.get(sector, [])
+                        suggested_stocks_pool.extend(stocks)
+                
+                # Remove duplicates
+                suggested_stocks_pool = list(set(suggested_stocks_pool))
+                
+                # Dynamically select up to 3 random distinct stocks from the relevant pool
+                num_to_select = min(3, len(suggested_stocks_pool))
+                suggested_stocks = random.sample(suggested_stocks_pool, num_to_select)
 
-            insights.append({
-                'title': title,
-                'source': item['source'],
-                'url': item['url'],
-                'publishedDate': item['publishedDate'],
-                'sectors': identified_sectors,
-                'sentiment': sentiment,
-                'description': f"{short_summary}", 
-                'stocks': suggested_stocks
-            })
+                insights.append({
+                    'title': title,
+                    'source': item.get('source', 'Unknown'),
+                    'url': item.get('url', '#'),
+                    'publishedDate': item.get('publishedDate', ''),
+                    'sectors': identified_sectors,
+                    'sentiment': sentiment,
+                    'description': f"{short_summary}", 
+                    'stocks': suggested_stocks
+                })
+            except Exception as e:
+                logger.error(f"Error processing news item: {e}")
+                continue
 
         self._insight_cache = insights
         self._insight_cache_time = datetime.now()

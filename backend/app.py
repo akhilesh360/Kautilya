@@ -83,7 +83,7 @@ def analyze(symbol):
         logger.info(f"[{symbol}] Starting parallel fetching...")
         import concurrent.futures
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             # Task definitions
             future_info = executor.submit(stock_service.get_company_info, symbol)
             future_hist = executor.submit(stock_service.get_historical_prices, symbol, period="5y")
@@ -94,21 +94,29 @@ def analyze(symbol):
             future_earn = executor.submit(stock_service.get_earnings_data, symbol)
             future_sec = executor.submit(stock_service.get_sec_filings, symbol)
             
-            # Wait for base info first to get company name for news
-            company_info = future_info.result()
+            # Helper to get result with timeout and fallback
+            def get_safe(future, default, name):
+                try:
+                    return future.result(timeout=25)
+                except Exception as e:
+                    logger.warning(f"[{symbol}] {name} fetch failed or timed out: {e}")
+                    return default
+
+            # Wait for base info first
+            company_info = get_safe(future_info, {}, "company info")
             
             # Now fetch news with name
             future_news = executor.submit(news_service.get_news_with_sentiment, symbol, company_info.get('name', ''))
             
             # Collect results (gracefully)
-            historical = future_hist.result()
-            financials = future_fin.result()
-            institutional = future_inst.result()
-            insider_tx = future_insider.result()
-            analyst_recs = future_recs.result()
-            earnings = future_earn.result()
-            sec_filings = future_sec.result()
-            news_data = future_news.result()
+            historical = get_safe(future_hist, {'data': [], 'dataPoints': 0}, "historical prices")
+            financials = get_safe(future_fin, {}, "financials")
+            institutional = get_safe(future_inst, [], "institutional")
+            insider_tx = get_safe(future_insider, [], "insider tx")
+            analyst_recs = get_safe(future_recs, [], "analyst recs")
+            earnings = get_safe(future_earn, {}, "earnings")
+            sec_filings = get_safe(future_sec, [], "sec filings")
+            news_data = get_safe(future_news, {'articles': [], 'sentiment': {}}, "news data")
 
         # Step 10: Run analysis engine
         logger.info(f"[{symbol}] Step 10: Running analysis engine...")
