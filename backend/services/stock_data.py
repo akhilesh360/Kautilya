@@ -325,24 +325,19 @@ class StockDataService:
 
         result['incomeStatement']['quarterly'] = _safe_get(
             lambda: _process_statement(ticker.quarterly_income_stmt), [], "quarterly income")
-        time.sleep(0.5)
-
+        
         result['incomeStatement']['annual'] = _safe_get(
             lambda: _process_statement(ticker.income_stmt), [], "annual income")
-        time.sleep(0.5)
-
+        
         result['balanceSheet']['quarterly'] = _safe_get(
             lambda: _process_statement(ticker.quarterly_balance_sheet), [], "quarterly balance")
-        time.sleep(0.5)
-
+        
         result['balanceSheet']['annual'] = _safe_get(
             lambda: _process_statement(ticker.balance_sheet), [], "annual balance")
-        time.sleep(0.5)
-
+        
         result['cashFlow']['quarterly'] = _safe_get(
             lambda: _process_statement(ticker.quarterly_cashflow), [], "quarterly cashflow")
-        time.sleep(0.5)
-
+        
         result['cashFlow']['annual'] = _safe_get(
             lambda: _process_statement(ticker.cashflow), [], "annual cashflow")
 
