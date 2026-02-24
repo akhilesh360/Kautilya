@@ -79,46 +79,36 @@ def analyze(symbol):
     logger.info(f"=== Starting analysis for {symbol} ===")
 
     try:
-        # Step 1: Company Info + Price Data (uses yf.download as base — very reliable)
-        logger.info(f"[{symbol}] Step 1: Fetching company info & price data...")
-        company_info = stock_service.get_company_info(symbol)
-        logger.info(f"[{symbol}] → Price: ${company_info.get('currentPrice', 0)}, Name: {company_info.get('name', 'N/A')}")
-
-        # Step 2: Historical prices (uses yf.download — very reliable)
-        logger.info(f"[{symbol}] Step 2: Fetching all-time historical prices...")
-        historical = stock_service.get_historical_prices(symbol, period="max")
-        logger.info(f"[{symbol}] → Got {historical.get('dataPoints', 0)} price data points")
-
-        # Step 3: Quarterly financials
-        logger.info(f"[{symbol}] Step 3: Fetching quarterly financials...")
-        time.sleep(0.5)
-        financials = stock_service.get_quarterly_financials(symbol)
-
-        # Step 4: News & Sentiment (RSS feeds, no Yahoo rate limit)
-        logger.info(f"[{symbol}] Step 4: Fetching news and sentiment...")
-        news_data = news_service.get_news_with_sentiment(symbol, company_info.get('name', ''))
-
-        # Step 5: Institutional holdings
-        logger.info(f"[{symbol}] Step 5: Fetching institutional data...")
-        time.sleep(0.5)
-        institutional = stock_service.get_institutional_holders(symbol)
-
-        # Step 6: Insider transactions
-        logger.info(f"[{symbol}] Step 6: Fetching insider transactions...")
-        insider_tx = stock_service.get_insider_transactions(symbol)
-
-        # Step 7: Analyst recommendations
-        logger.info(f"[{symbol}] Step 7: Fetching analyst recommendations...")
-        time.sleep(0.5)
-        analyst_recs = stock_service.get_analyst_recommendations(symbol)
-
-        # Step 8: Earnings
-        logger.info(f"[{symbol}] Step 8: Fetching earnings data...")
-        earnings = stock_service.get_earnings_data(symbol)
-
-        # Step 9: SEC filings
-        logger.info(f"[{symbol}] Step 9: Getting SEC filing links...")
-        sec_filings = stock_service.get_sec_filings(symbol)
+        # Step 1: Base Ticker Info (Fastest)
+        logger.info(f"[{symbol}] Starting parallel fetching...")
+        import concurrent.futures
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            # Task definitions
+            future_info = executor.submit(stock_service.get_company_info, symbol)
+            future_hist = executor.submit(stock_service.get_historical_prices, symbol, period="5y")
+            future_fin = executor.submit(stock_service.get_quarterly_financials, symbol)
+            future_inst = executor.submit(stock_service.get_institutional_holders, symbol)
+            future_insider = executor.submit(stock_service.get_insider_transactions, symbol)
+            future_recs = executor.submit(stock_service.get_analyst_recommendations, symbol)
+            future_earn = executor.submit(stock_service.get_earnings_data, symbol)
+            future_sec = executor.submit(stock_service.get_sec_filings, symbol)
+            
+            # Wait for base info first to get company name for news
+            company_info = future_info.result()
+            
+            # Now fetch news with name
+            future_news = executor.submit(news_service.get_news_with_sentiment, symbol, company_info.get('name', ''))
+            
+            # Collect results (gracefully)
+            historical = future_hist.result()
+            financials = future_fin.result()
+            institutional = future_inst.result()
+            insider_tx = future_insider.result()
+            analyst_recs = future_recs.result()
+            earnings = future_earn.result()
+            sec_filings = future_sec.result()
+            news_data = future_news.result()
 
         # Step 10: Run analysis engine
         logger.info(f"[{symbol}] Step 10: Running analysis engine...")

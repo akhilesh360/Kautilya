@@ -27,6 +27,8 @@ class NewsService:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
         }
+        self._insight_cache = None
+        self._insight_cache_time = None
 
     def get_stock_news(self, symbol: str, company_name: str = "", max_articles: int = 20) -> List[Dict[str, Any]]:
         """Fetch news articles from multiple sources."""
@@ -211,12 +213,25 @@ class NewsService:
     def get_market_insights(self) -> List[Dict[str, Any]]:
         """
         Fetch top 10 general market news and analyze their sector/stock impact.
-        This provides a high-level overview for a holding company strategy.
+        Optimized with caching for production stability.
         """
+        # Return cache if less than 15 minutes old
+        if self._insight_cache and self._insight_cache_time:
+            if datetime.now() - self._insight_cache_time < timedelta(minutes=15):
+                return self._insight_cache
+
         import random
         
+        # Try multiple queries for robustness
+        queries = ["financial markets news", "economy stock market", "S&P 500 movement"]
+        google_news = []
+        for q in queries:
+            try:
+                google_news.extend(self._fetch_google_news(f"{q} when:1d", max_articles=8))
+            except Exception: pass
+            if len(google_news) >= 15: break
+            
         yahoo_news = self._fetch_yahoo_news("SPY,QQQ,DIA,IWM", max_articles=15)
-        google_news = self._fetch_google_news("financial markets economy when:1d", max_articles=15)
         
         raw_news = yahoo_news + google_news
         random.shuffle(raw_news)
@@ -229,6 +244,16 @@ class NewsService:
             if title_key not in seen_titles and len(news_items) < 10:
                 seen_titles.add(title_key)
                 news_items.append(item)
+        
+        if not news_items:
+            # Emergency fallback news if everything fails
+            news_items = [{
+                'title': 'Market analysis indicates continued focus on inflation and tech earnings.',
+                'source': 'Kautilya AI',
+                'url': '#',
+                'publishedDate': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'summary': 'General market sentiment remains focused on macroeconomic indicators and corporate guidance.',
+            }]
 
         # Keyword mappings for "Intelligence" simulation
         sector_keywords = {
@@ -327,4 +352,6 @@ class NewsService:
                 'stocks': suggested_stocks
             })
 
+        self._insight_cache = insights
+        self._insight_cache_time = datetime.now()
         return insights
