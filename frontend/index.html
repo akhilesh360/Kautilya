@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="NifiPilot - AI-powered stock analysis with 10-K/10-Q filing analysis, price targets, and buy/hold/sell recommendations">
+    <title>Kautilya | AI Stock Analyzer & Recommendation Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+</head>
+
+<body>
+    <!-- Background Glow Effects -->
+    <div class="bg-glow bg-glow--1"></div>
+    <div class="bg-glow bg-glow--2"></div>
+    <div class="bg-glow bg-glow--3"></div>
+
+    <!-- Header -->
+    <header id="app-header">
+        <div class="header-inner">
+            <div class="logo" id="logo">
+                <div class="logo-icon">
+                    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                        <path d="M4 24L10 14L16 18L22 8L28 12" stroke="url(#grad1)" stroke-width="2.5"
+                            stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M22 8L28 8L28 14" stroke="url(#grad1)" stroke-width="2.5" stroke-linecap="round"
+                            stroke-linejoin="round" />
+                        <defs>
+                            <linearGradient id="grad1" x1="4" y1="24" x2="28" y2="8">
+                                <stop offset="0%" stop-color="#6366f1" />
+                                <stop offset="100%" stop-color="#06b6d4" />
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
+                <span class="logo-text">Kautilya</span>
+            </div>
+            <nav class="nav-links">
+                <a href="#" class="nav-link active" data-section="search">Analyze</a>
+                <a href="#" class="nav-link" data-section="insights">Insights</a>
+                <a href="#" class="nav-link" data-section="bucket">My Bucket</a>
+                <a href="#" class="nav-link" data-section="about">About</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="main-content">
+        <!-- Hero / Search Section -->
+        <section id="hero-section" class="section">
+            <div class="hero-content">
+                <h1 class="hero-title">
+                    <span class="hero-title-line">AI-Powered</span>
+                    <span class="hero-title-line gradient-text">Stock Intelligence</span>
+                </h1>
+                <p class="hero-subtitle">
+                    Comprehensive analysis using SEC 10-K/10-Q filings, real-time news sentiment,
+                    technical indicators, and institutional flow data. Get dynamic price targets
+                    and actionable buy/hold/sell recommendations.
+                </p>
+
+                <!-- Search Box -->
+                <div class="search-container" id="search-container">
+                    <div class="search-box">
+                        <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8" />
+                            <path d="m21 21-4.35-4.35" />
+                        </svg>
+                        <input type="text" id="stock-search-input" class="search-input"
+                            placeholder="Search by stock name or ticker (e.g., AAPL, Tesla, Microsoft...)"
+                            autocomplete="off">
+                        <button id="search-btn" class="search-btn">
+                            <span class="search-btn-text">Analyze</span>
+                            <svg class="search-btn-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2">
+                                <path d="M5 12h14M12 5l7 7-7 7" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="search-suggestions" class="search-suggestions hidden"></div>
+                </div>
+
+                <!-- Quick Picks -->
+                <div class="quick-picks">
+                    <span class="quick-picks-label">Popular:</span>
+                    <button class="quick-pick-btn" data-symbol="AAPL">AAPL</button>
+                    <button class="quick-pick-btn" data-symbol="MSFT">MSFT</button>
+                    <button class="quick-pick-btn" data-symbol="GOOGL">GOOGL</button>
+                    <button class="quick-pick-btn" data-symbol="NVDA">NVDA</button>
+                    <button class="quick-pick-btn" data-symbol="TSLA">TSLA</button>
+                    <button class="quick-pick-btn" data-symbol="AMZN">AMZN</button>
+                    <button class="quick-pick-btn" data-symbol="META">META</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Loading State -->
+        <section id="loading-section" class="section hidden">
+            <div class="loading-container">
+                <div class="loading-spinner">
+                    <div class="spinner-ring"></div>
+                    <div class="spinner-ring"></div>
+                    <div class="spinner-ring"></div>
+                </div>
+                <h2 class="loading-title">Analyzing <span id="loading-symbol"></span></h2>
+                <p class="loading-subtitle" id="loading-status">Fetching 5 years of financial data...</p>
+                <div class="loading-steps">
+                    <div class="loading-step" id="step-financials"><span class="step-dot"></span>Fetching 10-K & 10-Q
+                        Filings</div>
+                    <div class="loading-step" id="step-technicals"><span class="step-dot"></span>Computing Technical
+                        Indicators</div>
+                    <div class="loading-step" id="step-news"><span class="step-dot"></span>Analyzing Business News
+                        Sentiment</div>
+                    <div class="loading-step" id="step-institutional"><span class="step-dot"></span>Reviewing
+                        Institutional Holdings</div>
+                    <div class="loading-step" id="step-targets"><span class="step-dot"></span>Calculating Price Targets
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Bucket Section -->
+        <section id="bucket-section" class="section hidden">
+            <div class="hero-content">
+                <h1 class="hero-title">My <span class="gradient-text">Portfolio Bucket</span></h1>
+                <p class="hero-subtitle">Track your holdings and get AI-driven portfolio optimization insights.</p>
+            </div>
+
+            <div class="bucket-container">
+                <div class="bucket-sidebar">
+                    <div class="search-box portfolio-add-box">
+                        <input type="text" id="portfolio-symbol" class="search-input" placeholder="Symbol (e.g. NVDA)">
+                        <input type="number" id="portfolio-avg-price" class="search-input" placeholder="Avg Price">
+                        <input type="number" id="portfolio-qty" class="search-input" placeholder="Qty">
+                        <button id="add-to-bucket-btn" class="search-btn">Add</button>
+                    </div>
+                    <div id="portfolio-list" class="portfolio-list">
+                        <!-- Portfolio items will be rendered here -->
+                    </div>
+                </div>
+                <div class="bucket-main">
+                    <div id="bucket-analysis-placeholder" class="bucket-analysis-placeholder">
+                        <div class="placeholder-icon">📊</div>
+                        <h3>Portfolio Intelligence</h3>
+                        <p>Select a stock from your bucket or add a new one to generate deep portfolio insights, risk
+                            analysis, and position recommendations.</p>
+                    </div>
+                    <div id="bucket-analysis-view" class="bucket-analysis-view hidden">
+                        <!-- Detailed portfolio analysis will be rendered here -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Market Insights Section -->
+        <section id="insights-section" class="section hidden">
+            <div class="hero-content">
+                <h1 class="hero-title">Market <span class="gradient-text">Intelligence</span></h1>
+                <p class="hero-subtitle">Top 10 daily financial insights with sector analysis and stock opportunities.
+                </p>
+            </div>
+
+            <div id="insights-loading" class="insights-loading hidden">
+                <div class="placeholder-icon" style="animation: pulse 2s infinite">🔍</div>
+                <h3>Scanning Global Markets...</h3>
+                <p>Analyzing headlines for sector impacts and institutional opportunities.</p>
+            </div>
+
+            <div id="insights-grid" class="insights-grid">
+                <!-- AI dynamic insights cards will be rendered here -->
+            </div>
+        </section>
+
+        <!-- Results Section -->
+        <section id="results-section" class="section hidden">
+
+            <!-- Company Header -->
+            <div id="company-header" class="company-header">
+                <div class="company-header-left">
+                    <h2 class="company-name" id="company-name"></h2>
+                    <div class="company-meta">
+                        <span class="company-sector" id="company-sector"></span>
+                    </div>
+                </div>
+                <div class="company-header-right">
+                    <div class="price-display">
+                        <span class="current-price" id="current-price"></span>
+                        <span class="price-change" id="price-change"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recommendation Banner -->
+            <div id="recommendation-banner" class="recommendation-banner">
+                <div class="rec-badge-container">
+                    <div class="rec-badge" id="rec-badge">
+                        <span class="rec-action" id="rec-action"></span>
+                    </div>
+                    <div class="rec-score-ring" id="rec-score-ring">
+                        <svg viewBox="0 0 120 120">
+                            <circle cx="60" cy="60" r="54" fill="none" stroke="rgba(255,255,255,0.1)"
+                                stroke-width="8" />
+                            <circle id="score-circle" cx="60" cy="60" r="54" fill="none" stroke-width="8"
+                                stroke-linecap="round" stroke-dasharray="339.292" stroke-dashoffset="339.292"
+                                transform="rotate(-90 60 60)" />
+                        </svg>
+                        <span class="rec-score-value" id="rec-score-value"></span>
+                    </div>
+                </div>
+                <div class="rec-details">
+                    <p class="rec-reasoning" id="rec-reasoning"></p>
+                    <div class="rec-meta">
+                        <span class="rec-date" id="rec-date"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chart Section -->
+            <div class="section-title-row">
+                <h3 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 3v18h18" />
+                        <path d="m19 9-5 5-4-4-3 3" />
+                    </svg>
+                    Price History
+                    <span id="chart-performance" class="chart-performance"></span>
+                </h3>
+                <div class="chart-period-btns">
+                    <button class="period-btn" data-period="1d">1D</button>
+                    <button class="period-btn" data-period="3d">3D</button>
+                    <button class="period-btn" data-period="5d">5D</button>
+                    <button class="period-btn" data-period="1mo">1M</button>
+                    <button class="period-btn" data-period="3mo">3M</button>
+                    <button class="period-btn" data-period="6mo">6M</button>
+                    <button class="period-btn" data-period="ytd">YTD</button>
+                    <button class="period-btn" data-period="1y">1Y</button>
+                    <button class="period-btn" data-period="3y">3Y</button>
+                    <button class="period-btn" data-period="5y">5Y</button>
+                    <button class="period-btn active" data-period="max">All</button>
+                </div>
+            </div>
+            <div class="chart-container">
+                <canvas id="price-chart"></canvas>
+            </div>
+
+            <!-- Price Targets Section -->
+            <div class="section-title-row">
+                <h3 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 6v6l4 2" />
+                    </svg>
+                    Dynamic Price Targets
+                </h3>
+            </div>
+            <div class="price-targets-grid" id="price-targets-grid"></div>
+
+            <!-- Score Breakdown -->
+            <div class="section-title-row">
+                <h3 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                    </svg>
+                    Analysis Breakdown
+                </h3>
+            </div>
+            <div class="scores-grid" id="scores-grid"></div>
+
+            <!-- Key Metrics -->
+            <div class="section-title-row">
+                <h3 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <path d="M3 9h18M9 21V9" />
+                    </svg>
+                    Key Financial Metrics
+                </h3>
+            </div>
+            <div class="metrics-grid" id="metrics-grid"></div>
+
+            <!-- Technical Indicators -->
+            <div class="section-title-row">
+                <h3 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path
+                            d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
+                    </svg>
+                    Technical Indicators
+                </h3>
+            </div>
+            <div class="indicators-grid" id="indicators-grid"></div>
+
+            <!-- News & Sentiment -->
+            <div class="section-title-row">
+                <h3 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path
+                            d="M4 22h16a2 2 0 002-2V4a2 2 0 00-2-2H8a2 2 0 00-2 2v16a2 2 0 01-2 2zm0 0a2 2 0 01-2-2v-9c0-1.1.9-2 2-2h2" />
+                        <path d="M18 14h-8M15 18h-5M10 6h8" />
+                    </svg>
+                    News & Sentiment Analysis
+                </h3>
+            </div>
+            <div class="sentiment-overview" id="sentiment-overview"></div>
+            <div class="news-grid" id="news-grid"></div>
+
+            <!-- Risk Factors -->
+            <div class="section-title-row">
+                <h3 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path
+                            d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4M12 17h.01" />
+                    </svg>
+                    Risk Assessment
+                </h3>
+            </div>
+            <div class="risks-grid" id="risks-grid"></div>
+
+            <!-- SEC Filings -->
+            <div class="section-title-row">
+                <h3 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                        <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
+                    </svg>
+                    SEC Filings (10-K / 10-Q)
+                </h3>
+            </div>
+            <div class="filings-grid" id="filings-grid"></div>
+
+            <!-- Institutional Holders -->
+            <div class="section-title-row">
+                <h3 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                        <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
+                    </svg>
+                    Institutional Holdings & Insider Activity
+                </h3>
+            </div>
+            <div class="holders-grid" id="holders-grid"></div>
+
+            <!-- Earnings -->
+            <div class="section-title-row">
+                <h3 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="1" x2="12" y2="23" />
+                        <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" />
+                    </svg>
+                    Earnings Performance
+                </h3>
+            </div>
+            <div class="earnings-grid" id="earnings-grid"></div>
+
+            <!-- Quarterly Financials Deep Dive -->
+            <div class="section-title-row">
+                <h3 class="section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <path d="M3 9h18M9 21V9" />
+                    </svg>
+                    Quarterly Financial Statements
+                </h3>
+                <div class="chart-period-btns">
+                    <button class="stmt-btn active" data-stmt="income">Income Statement</button>
+                    <button class="stmt-btn" data-stmt="balance">Balance Sheet</button>
+                    <button class="stmt-btn" data-stmt="cashflow">Cash Flow</button>
+                </div>
+            </div>
+            <div class="financials-table-container" id="financials-table-container"></div>
+
+            <!-- Disclaimer -->
+            <div class="disclaimer">
+                <p><strong>Disclaimer:</strong> This analysis is for informational purposes only and does not constitute
+                    financial advice.
+                    Past performance does not guarantee future results. Always consult with a qualified financial
+                    advisor before making investment decisions.
+                    Data sourced from public financial databases including SEC EDGAR, Yahoo Finance, and news
+                    aggregators.</p>
+            </div>
+        </section>
+    </main>
+
+    <footer id="app-footer">
+        <div class="footer-inner">
+            <p>&copy; 2025 Kautilya. AI-Powered Stock Intelligence Platform.</p>
+            <p class="footer-sub">Data from SEC EDGAR, Yahoo Finance & Google News. Not financial advice.</p>
+        </div>
+    </footer>
+
+    <script src="js/app.js"></script>
+</body>
+
+</html>
