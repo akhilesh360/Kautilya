@@ -795,6 +795,107 @@ main {
     font-weight: 600;
 }
 
+/* ---- Alpha Signals (The Edge) ---- */
+.alpha-signals-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: var(--space-lg);
+    margin-bottom: var(--space-xl);
+}
+
+.alpha-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    position: relative;
+    overflow: hidden;
+    transition: all var(--transition-base);
+}
+
+.alpha-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--accent-violet);
+    box-shadow: var(--shadow-glow);
+}
+
+.alpha-card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 100px;
+    height: 100px;
+    background: radial-gradient(circle at top right, rgba(139, 92, 246, 0.1), transparent 70%);
+}
+
+.alpha-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-md);
+}
+
+.alpha-type {
+    font-size: 0.75rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent-violet);
+}
+
+.alpha-strength {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    padding: 2px 8px;
+    background: rgba(139, 92, 246, 0.1);
+    color: var(--accent-violet);
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.alpha-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: var(--space-sm);
+}
+
+.alpha-detail {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: var(--space-md);
+}
+
+.alpha-edge {
+    background: rgba(255, 255, 255, 0.03);
+    border-left: 2px solid var(--accent-cyan);
+    padding: var(--space-sm) var(--space-md);
+    font-size: 0.85rem;
+    font-style: italic;
+    color: var(--accent-cyan);
+}
+
+.conviction-badge {
+    font-size: 0.8rem;
+    padding: 4px 12px;
+    border-radius: var(--radius-full);
+    margin-left: var(--space-md);
+    background: var(--gradient-primary);
+    color: white;
+    font-weight: 700;
+}
+
+.alpha-empty-state {
+    grid-column: 1 / -1;
+    padding: var(--space-3xl) 0;
+    text-align: center;
+    color: var(--text-muted);
+    background: var(--bg-glass);
+    border: 1px dashed var(--border-medium);
+    border-radius: var(--radius-lg);
+}
+
 /* ---- Price Targets Grid ---- */
 .price-targets-grid {
     display: grid;
@@ -1904,6 +2005,7 @@ footer p {
     font-weight: 700;
     color: var(--accent-indigo);
 }
+
 /* ---- Insights Section ---- */
 .insights-grid {
     display: grid;
@@ -1940,8 +2042,13 @@ footer p {
     height: 100%;
 }
 
-.insight-card.positive::before { background: var(--accent-emerald); }
-.insight-card.negative::before { background: var(--accent-rose); }
+.insight-card.positive::before {
+    background: var(--accent-emerald);
+}
+
+.insight-card.negative::before {
+    background: var(--accent-rose);
+}
 
 .insight-header {
     display: flex;
@@ -1958,8 +2065,15 @@ footer p {
     letter-spacing: 0.05em;
 }
 
-.insight-sentiment.positive { background: rgba(16, 185, 129, 0.1); color: var(--accent-emerald); }
-.insight-sentiment.negative { background: rgba(244, 63, 94, 0.1); color: var(--accent-rose); }
+.insight-sentiment.positive {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--accent-emerald);
+}
+
+.insight-sentiment.negative {
+    background: rgba(244, 63, 94, 0.1);
+    color: var(--accent-rose);
+}
 
 .insight-title {
     font-size: 1.25rem;

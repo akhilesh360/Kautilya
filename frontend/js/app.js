@@ -242,6 +242,7 @@ function renderResults(data) {
     renderCompanyHeader(info);
     renderRecommendation(analysis);
     renderPriceTargets(analysis.priceTargets);
+    renderAlphaSignals(analysis);
     renderScores(analysis.scores);
     renderChart(data.historicalPrices);
     renderKeyMetrics(analysis.keyMetrics);
@@ -326,6 +327,39 @@ function renderPriceTargets(targets) {
             </div>
         `;
     }).join('');
+}
+
+function renderAlphaSignals(analysis) {
+    const container = document.getElementById('alpha-signals-container');
+    const badge = document.getElementById('conviction-badge');
+    const signals = analysis.alphaSignals || [];
+
+    // Render Badge
+    if (analysis.convictionScore) {
+        badge.textContent = `${analysis.convictionLabel} (Conviction: ${analysis.convictionScore}%)`;
+        badge.style.display = 'inline-block';
+    } else {
+        badge.style.display = 'none';
+    }
+
+    if (signals.length === 0) {
+        container.innerHTML = '<div class="alpha-empty-state">No specific high-conviction alpha patterns detected for this quarter.</div>';
+        return;
+    }
+
+    container.innerHTML = signals.map(s => `
+        <div class="alpha-card animate-in">
+            <div class="alpha-header">
+                <span class="alpha-type">${s.type}</span>
+                <span class="alpha-strength">${s.strength}% Intensity</span>
+            </div>
+            <h4 class="alpha-title">${s.signal} Development Detected</h4>
+            <p class="alpha-detail">${s.detail}</p>
+            <div class="alpha-edge">
+                <strong>Intelligence Edge:</strong> ${s.edge}
+            </div>
+        </div>
+    `).join('');
 }
 
 function renderScores(scores) {

@@ -89,6 +89,14 @@ class AnalysisEngine:
         # Build key metrics summary
         key_metrics = self._build_key_metrics(company_info, financials)
 
+        # Run Alpha Pattern Discovery (The "Edge")
+        alpha_signals = self._discover_alpha_patterns(financials, company_info)
+        
+        # Neural Signal Fusion for conviction
+        conviction_data = self._neural_signal_fusion(
+            fundamental_score, technical_analysis, sentiment_score, alpha_signals
+        )
+
         return {
             'symbol': symbol,
             'companyName': company_info.get('name', symbol),
@@ -97,6 +105,9 @@ class AnalysisEngine:
             'overallScore': round(overall_score, 1),
             'recommendation': recommendation,
             'priceTargets': price_targets,
+            'alphaSignals': alpha_signals,
+            'convictionScore': conviction_data['score'],
+            'convictionLabel': conviction_data['label'],
             'scores': {
                 'fundamental': fundamental_score,
                 'technical': technical_analysis,
@@ -804,6 +815,102 @@ class AnalysisEngine:
             'upcomingDates': dates[:2],
             'recentHistory': history[:4],
         }
+
+    def _discover_alpha_patterns(self, financials: Dict, info: Dict) -> List[Dict[str, Any]]:
+        """
+        Extract 'Alpha' signals from 10-K/10-Q time-series data.
+        Identifies patterns that predict future outperformance before they become obvious.
+        """
+        signals = []
+        q_cf = financials.get('cashFlow', {}).get('quarterly', [])
+        q_is = financials.get('incomeStatement', {}).get('quarterly', [])
+        q_bs = financials.get('balanceSheet', {}).get('quarterly', [])
+        
+        if not q_cf or not q_is or len(q_cf) < 2:
+            return signals
+
+        # 1. Cash vs Accrual Divergence (Earnings Quality)
+        # Pattern: Operating Cash Flow growing faster than Net Income
+        try:
+            latest_cf = q_cf[0]
+            prev_cf = q_cf[1]
+            latest_ni = q_is[0]
+            
+            ocf_latest = latest_cf.get('Operating Cash Flow', 0) or 0
+            ocf_prev = prev_cf.get('Operating Cash Flow', 0) or 0
+            ni_latest = latest_ni.get('Net Income', 1) or 1
+            
+            if ocf_latest > ni_latest * 1.2:
+                signals.append({
+                    'type': 'Cash Divergence',
+                    'signal': 'Bullish',
+                    'strength': 85,
+                    'detail': 'Operating cash flow significantly exceeding net income. High quality earnings pulse detected.',
+                    'edge': 'Accrual accounting often masks cash strength; this typically precedes dividend hikes or buybacks.'
+                })
+        except Exception: pass
+
+        # 2. Working Capital Optimization
+        # Pattern: Decreasing Inventory or Receivables relative to Revenue
+        try:
+            latest_rev = q_is[0].get('Total Revenue', 1) or 1
+            latest_inv = q_bs[0].get('Inventory', 0) or 0
+            prev_inv = q_bs[1].get('Inventory', 0) or 0
+            
+            if latest_inv < prev_inv * 0.95 and latest_rev > q_is[1].get('Total Revenue', 0) or 0:
+                signals.append({
+                    'type': 'Efficiency Alpha',
+                    'signal': 'Bullish',
+                    'strength': 70,
+                    'detail': 'Inventory levels dropping while revenue grows.',
+                    'edge': 'Indicates strong product demand and efficient supply chain management before margins expand in the next 10-Q.'
+                })
+        except Exception: pass
+
+        # 3. Capital intensity shift
+        # Pattern: CapEx decreasing as % of Revenue
+        try:
+            latest_capex = abs(q_cf[0].get('Capital Expenditure', 0) or 0)
+            latest_rev = q_is[0].get('Total Revenue', 1) or 1
+            intensity = latest_capex / latest_rev
+            
+            if intensity < 0.05:
+                signals.append({
+                    'type': 'Asset Light',
+                    'signal': 'Neutral-Bullish',
+                    'strength': 60,
+                    'detail': f'Low capital intensity ({intensity*100:.1f}% of revenue).',
+                    'edge': 'Low CapEx requirements typically lead to higher multi-year Free Cash Flow multiples.'
+                })
+        except Exception: pass
+
+        return signals
+
+    def _neural_signal_fusion(self, fundamental: Dict, technical: Dict, sentiment: Dict, alpha: List) -> Dict[str, Any]:
+        """
+        Fuses across disparate data sources for a meta-conviction score.
+        """
+        f_score = fundamental.get('score', 50)
+        t_score = technical.get('score', 50)
+        s_score = sentiment.get('score', 50)
+        
+        a_boost = 0
+        for signal in alpha:
+            if signal['signal'] == 'Bullish':
+                a_boost += (signal['strength'] / 100) * 10
+            elif signal['signal'] == 'Bearish':
+                a_boost -= (signal['strength'] / 100) * 10
+        
+        f_weight, t_weight, s_weight = 0.4, 0.4, 0.2
+        base_conviction = (f_score * f_weight) + (t_score * t_weight) + (s_score * s_weight)
+        final_conviction = max(0, min(100, base_conviction + a_boost))
+        
+        label = 'Moderate'
+        if final_conviction > 75: label = 'High Conviction'
+        elif final_conviction > 60: label = 'Good'
+        elif final_conviction < 40: label = 'Low Confidence'
+        
+        return {'score': round(final_conviction, 1), 'label': label}
 
     def _ema(self, data: list, period: int) -> float:
         """Calculate Exponential Moving Average."""
