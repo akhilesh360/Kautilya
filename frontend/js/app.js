@@ -268,11 +268,11 @@ function renderCompanyHeader(info) {
 }
 
 function renderRecommendation(analysis) {
-    const rec = analysis.recommendation;
+    const rec = analysis.recommendation || { action: 'UNKNOWN', color: '#999', reasoning: 'Insufficient data' };
     const badge = document.getElementById('rec-badge');
-    badge.style.background = rec.color + '22';
-    badge.style.color = rec.color;
-    badge.style.border = `2px solid ${rec.color}`;
+    badge.style.background = (rec.color || '#999') + '22';
+    badge.style.color = rec.color || '#999';
+    badge.style.border = `2px solid ${rec.color || '#999'}`;
     document.getElementById('rec-action').textContent = rec.action;
 
     // Score ring
