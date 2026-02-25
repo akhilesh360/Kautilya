@@ -186,6 +186,8 @@ async function analyzeStock(symbol) {
 
     try {
         const res = await fetch(`${API_BASE}/analyze/${encodeURIComponent(symbol)}`);
+
+        // Immediate cleanup
         clearInterval(stepInterval);
         clearTimeout(timeout);
 
@@ -194,29 +196,32 @@ async function analyzeStock(symbol) {
             try {
                 const errData = await res.json();
                 errMsg = errData.error || errMsg;
-            } catch (e) { /* response might not be JSON */ }
+            } catch (e) { }
             throw new Error(errMsg);
         }
 
-        currentData = await res.json();
+        const data = await res.json();
 
-        // Handle case where backend returns success but analysis engine failed
-        if (currentData.analysis && currentData.analysis.error) {
-            throw new Error(currentData.analysis.error);
+        // Robust data validation
+        if (!data || !data.analysis) {
+            throw new Error('Received malformed data from server');
         }
 
-        allHistoricalData = currentData.historicalPrices?.data || [];
+        if (data.analysis.error) {
+            throw new Error(data.analysis.error);
+        }
 
-        // Mark all steps done
+        currentData = data;
+        allHistoricalData = data.historicalPrices?.data || [];
+
+        // Success: Mark metrics done and render
         steps.forEach(s => {
             document.getElementById(s).classList.remove('active');
             document.getElementById(s).classList.add('done');
         });
 
-        setTimeout(() => {
-            renderResults(currentData);
-            showSection('results');
-        }, 500);
+        renderResults(data);
+        showSection('results');
 
     } catch (err) {
         clearInterval(stepInterval);
