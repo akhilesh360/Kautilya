@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_session():
-    """Create a persistent session with rotating User-Agents to avoid blocking."""
+    """Create a persistent session with rotating User-Agents and FORCED timeouts."""
     session = requests.Session()
     uas = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -30,6 +30,14 @@ def _get_session():
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0'
     ]
     session.headers.update({'User-Agent': random.choice(uas)})
+    
+    # Extreme Guard: Force timeout on all calls made through this session
+    orig_request = session.request
+    def forced_timeout_request(*args, **kwargs):
+        kwargs.setdefault('timeout', 15)
+        return orig_request(*args, **kwargs)
+    session.request = forced_timeout_request
+    
     return session
 
 
@@ -60,6 +68,7 @@ class StockDataService:
         """Search for stocks by name or ticker symbol."""
         try:
             ticker = yf.Ticker(query.upper(), session=_get_session())
+            # For info/search, we'll rely on the global ThreadPool timeout since yf.Ticker doesn't take timeout= directly
             info = _safe_get(lambda: ticker.info, {}, f"search {query}")
 
             if info and info.get('symbol'):
@@ -216,7 +225,7 @@ class StockDataService:
 
         # Use a single yf.download() for 1y to get current price and 52-week range
         try:
-            df = yf.download(symbol, period="1y", progress=False, auto_adjust=True, session=_get_session())
+            df = yf.download(symbol, period="1y", progress=False, auto_adjust=True, session=_get_session(), timeout=15)
             if df is not None and not df.empty:
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
@@ -255,6 +264,16 @@ class StockDataService:
             except Exception as fe:
                 logger.warning(f"[{symbol}] FastInfo fallback failed: {fe}")
 
+        # Final Fallback: ticker.history(period='1d')
+        if not result.get('currentPrice'):
+            try:
+                hist = ticker.history(period='1d', session=_get_session())
+                if not hist.empty:
+                    result['currentPrice'] = round(float(hist.iloc[-1]['Close']), 2)
+                    logger.info(f"[{symbol}] Used ticker.history fallback for price.")
+            except Exception as he:
+                logger.warning(f"[{symbol}] History fallback failed: {he}")
+
         return result
 
     def get_historical_prices(self, symbol: str, period: str = "5y") -> Dict[str, Any]:
@@ -270,11 +289,11 @@ class StockDataService:
             elif period in ['3d', '5d']:
                 interval = '15m'
 
-            df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True, session=_get_session())
+            df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True, session=_get_session(), timeout=15)
 
             if df is None or df.empty:
                 logger.warning(f"[{symbol}] No data for {period}, trying 2y")
-                df = yf.download(symbol, period="2y", progress=False, auto_adjust=True, session=_get_session())
+                df = yf.download(symbol, period="2y", progress=False, auto_adjust=True, session=_get_session(), timeout=15)
 
             if df is None or df.empty:
                 return {'error': 'No historical data', 'symbol': symbol, 'data': []}

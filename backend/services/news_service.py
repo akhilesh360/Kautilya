@@ -77,7 +77,8 @@ class NewsService:
         articles = []
         try:
             url = self.GOOGLE_NEWS_RSS.format(query=query.replace(' ', '+'))
-            feed = feedparser.parse(url)
+            resp = requests.get(url, headers=self.headers, timeout=10)
+            feed = feedparser.parse(resp.content)
 
             for entry in feed.entries[:max_articles]:
                 published = ''
@@ -114,7 +115,8 @@ class NewsService:
         articles = []
         try:
             yahoo_rss = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
-            feed = feedparser.parse(yahoo_rss)
+            resp = requests.get(yahoo_rss, headers=self.headers, timeout=10)
+            feed = feedparser.parse(resp.content)
 
             for entry in feed.entries[:max_articles]:
                 published = ''
@@ -344,14 +346,18 @@ class NewsService:
                 if not identified_sectors:
                     identified_sectors = ['General Market']
 
-                # Determine sentiment
-                blob = TextBlob(f"{title} {short_summary}")
-                sentiment_val = blob.sentiment.polarity
-                sentiment = "positive" if sentiment_val >= 0 else "negative"
-                
-                # Override with explicit negative keywords using word boundaries
-                if any(re.search(rf'\b{re.escape(word)}\b', title.lower()) or re.search(rf'\b{re.escape(word)}\b', short_summary.lower()) for word in negative_keywords):
-                    sentiment = "negative"
+                # Determine sentiment with safety
+                try:
+                    blob = TextBlob(f"{title} {short_summary}")
+                    sentiment_val = blob.sentiment.polarity
+                    sentiment = "positive" if sentiment_val >= 0 else "negative"
+                    
+                    # Override with explicit negative keywords using word boundaries
+                    if any(re.search(rf'\b{re.escape(word)}\b', title.lower()) or re.search(rf'\b{re.escape(word)}\b', short_summary.lower()) for word in negative_keywords):
+                        sentiment = "negative"
+                except Exception as te:
+                    logger.warning(f"Sentiment analysis failed for item: {te}")
+                    sentiment = "neutral"
 
                 # Identify potential stocks based on matched sectors specifically
                 suggested_stocks_pool = []
