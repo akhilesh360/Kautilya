@@ -213,7 +213,7 @@ def market_insights():
         return jsonify({'insights': insights})
     except Exception as e:
         logger.error(f"Market insights error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'insights': [], 'error': str(e)})
 
 
 if __name__ == '__main__':

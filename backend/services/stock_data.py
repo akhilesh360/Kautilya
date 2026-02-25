@@ -237,6 +237,24 @@ class StockDataService:
         except Exception as e:
             logger.warning(f"[{symbol}] yf.download core metrics failed: {e}")
 
+        # Emergency Fallback: Ticker.fast_info (more resilient than download/info)
+        if not result.get('currentPrice'):
+            try:
+                ticker = self._get_ticker(symbol)
+                fast = ticker.fast_info
+                result['currentPrice'] = round(float(fast.get('lastPrice', 0)), 2)
+                result['previousClose'] = round(float(fast.get('previousClose', 0)), 2)
+                result['marketCap'] = int(fast.get('marketCap', 0))
+                result['open'] = round(float(fast.get('open', 0)), 2)
+                result['dayLow'] = round(float(fast.get('dayLow', 0)), 2)
+                result['dayHigh'] = round(float(fast.get('dayHigh', 0)), 2)
+                if not result.get('fiftyTwoWeekLow'):
+                    result['fiftyTwoWeekLow'] = round(float(fast.get('yearLow', 0)), 2)
+                    result['fiftyTwoWeekHigh'] = round(float(fast.get('yearHigh', 0)), 2)
+                logger.info(f"[{symbol}] Used Ticker.fast_info fallback for price.")
+            except Exception as fe:
+                logger.warning(f"[{symbol}] FastInfo fallback failed: {fe}")
+
         return result
 
     def get_historical_prices(self, symbol: str, period: str = "5y") -> Dict[str, Any]:

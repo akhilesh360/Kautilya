@@ -199,6 +199,12 @@ async function analyzeStock(symbol) {
         }
 
         currentData = await res.json();
+
+        // Handle case where backend returns success but analysis engine failed
+        if (currentData.analysis && currentData.analysis.error) {
+            throw new Error(currentData.analysis.error);
+        }
+
         allHistoricalData = currentData.historicalPrices?.data || [];
 
         // Mark all steps done

@@ -29,6 +29,16 @@ class NewsService:
         }
         self._insight_cache = None
         self._insight_cache_time = None
+        
+        # Ensure NLTK data is available for TextBlob on Render
+        try:
+            import nltk
+            nltk.download('punkt', quiet=True)
+            nltk.download('punkt_tab', quiet=True)
+            nltk.download('averaged_perceptron_tagger', quiet=True)
+            nltk.download('averaged_perceptron_tagger_eng', quiet=True)
+        except Exception as e:
+            logger.warning(f"NLTK download failed: {e}")
 
     def get_stock_news(self, symbol: str, company_name: str = "", max_articles: int = 20) -> List[Dict[str, Any]]:
         """Fetch news articles from multiple sources."""
