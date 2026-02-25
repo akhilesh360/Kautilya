@@ -231,16 +231,21 @@ class NewsService:
             except Exception: pass
             if len(google_news) >= 15: break
             
-        yahoo_news = self._fetch_yahoo_news("SPY,QQQ,DIA,IWM", max_articles=15)
+        yahoo_news = self._fetch_yahoo_news("SPY,QQQ,DIA,IWM", max_articles=15) or []
         
-        raw_news = yahoo_news + google_news
+        raw_news = (yahoo_news if isinstance(yahoo_news, list) else []) + \
+                   (google_news if isinstance(google_news, list) else [])
         random.shuffle(raw_news)
         
-        # Deduplicate and limit to 10
+        # Deduplicate and limit to 10 safely
         seen_titles = set()
         news_items = []
         for item in raw_news:
-            title_key = re.sub(r'[^a-z0-9]', '', item['title'].lower())[:40]
+            if not isinstance(item, dict): continue
+            title = item.get('title', '')
+            if not title: continue
+            
+            title_key = re.sub(r'[^a-z0-9]', '', title.lower())[:40]
             if title_key not in seen_titles and len(news_items) < 10:
                 seen_titles.add(title_key)
                 news_items.append(item)

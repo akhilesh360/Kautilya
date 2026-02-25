@@ -10,6 +10,7 @@ Uses multiple strategies to get data:
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import requests
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 import logging
@@ -17,6 +18,19 @@ import time
 import random
 
 logger = logging.getLogger(__name__)
+
+
+def _get_session():
+    """Create a persistent session with rotating User-Agents to avoid blocking."""
+    session = requests.Session()
+    uas = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0'
+    ]
+    session.headers.update({'User-Agent': random.choice(uas)})
+    return session
 
 
 def _safe_get(func, default=None, label=""):
@@ -40,12 +54,12 @@ class StockDataService:
 
     def _get_ticker(self, symbol: str) -> yf.Ticker:
         """Get a fresh yfinance Ticker (isolated for multi-threading)."""
-        return yf.Ticker(symbol)
+        return yf.Ticker(symbol, session=_get_session())
 
     def search_stock(self, query: str) -> List[Dict[str, str]]:
         """Search for stocks by name or ticker symbol."""
         try:
-            ticker = self._get_ticker(query.upper())
+            ticker = yf.Ticker(query.upper(), session=_get_session())
             info = _safe_get(lambda: ticker.info, {}, f"search {query}")
 
             if info and info.get('symbol'):
@@ -202,7 +216,7 @@ class StockDataService:
 
         # Use a single yf.download() for 1y to get current price and 52-week range
         try:
-            df = yf.download(symbol, period="1y", progress=False, auto_adjust=True)
+            df = yf.download(symbol, period="1y", progress=False, auto_adjust=True, session=_get_session())
             if df is not None and not df.empty:
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
@@ -238,11 +252,11 @@ class StockDataService:
             elif period in ['3d', '5d']:
                 interval = '15m'
 
-            df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True)
+            df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True, session=_get_session())
 
             if df is None or df.empty:
                 logger.warning(f"[{symbol}] No data for {period}, trying 2y")
-                df = yf.download(symbol, period="2y", progress=False, auto_adjust=True)
+                df = yf.download(symbol, period="2y", progress=False, auto_adjust=True, session=_get_session())
 
             if df is None or df.empty:
                 return {'error': 'No historical data', 'symbol': symbol, 'data': []}
