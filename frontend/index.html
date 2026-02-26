@@ -28,14 +28,19 @@
             <div class="logo" id="logo">
                 <div class="logo-icon">
                     <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-                        <path d="M4 24L10 14L16 18L22 8L28 12" stroke="url(#grad1)" stroke-width="2.5"
+                        <rect x="4" y="4" width="24" height="24" rx="6" stroke="url(#grad1)" stroke-width="1.8"
+                            opacity="0.35" />
+                        <path d="M7 21.5H25" stroke="url(#grad1)" stroke-width="1.8" stroke-linecap="round" opacity="0.55" />
+                        <path d="M8 20L13 15L17 17.5L23 10.5" stroke="url(#grad1)" stroke-width="2.6"
                             stroke-linecap="round" stroke-linejoin="round" />
-                        <path d="M22 8L28 8L28 14" stroke="url(#grad1)" stroke-width="2.5" stroke-linecap="round"
+                        <path d="M20.8 10.5H23.8V13.5" stroke="url(#grad1)" stroke-width="2.4" stroke-linecap="round"
                             stroke-linejoin="round" />
+                        <circle cx="13" cy="15" r="1.4" fill="#16a34a" opacity="0.95" />
+                        <circle cx="23" cy="10.5" r="1.4" fill="#22c55e" opacity="0.95" />
                         <defs>
                             <linearGradient id="grad1" x1="4" y1="24" x2="28" y2="8">
-                                <stop offset="0%" stop-color="#6366f1" />
-                                <stop offset="100%" stop-color="#06b6d4" />
+                                <stop offset="0%" stop-color="#16a34a" />
+                                <stop offset="100%" stop-color="#22c55e" />
                             </linearGradient>
                         </defs>
                     </svg>
@@ -43,10 +48,10 @@
                 <span class="logo-text">Kautilya</span>
             </div>
             <nav class="nav-links">
-                <a href="#" class="nav-link active" data-section="search">Analyze</a>
-                <a href="#" class="nav-link" data-section="insights">Insights</a>
-                <a href="#" class="nav-link" data-section="bucket">My Bucket</a>
-                <a href="#" class="nav-link" data-section="about">About</a>
+                <a href="/analyze" class="nav-link active" data-section="search">Analyze</a>
+                <a href="/insights" class="nav-link" data-section="insights">Insights</a>
+                <a href="/bucket" class="nav-link" data-section="bucket">My Bucket</a>
+                <a href="/about" class="nav-link" data-section="about">About</a>
             </nav>
         </div>
     </header>
@@ -106,9 +111,17 @@
         <section id="loading-section" class="section hidden">
             <div class="loading-container">
                 <div class="loading-spinner">
-                    <div class="spinner-ring"></div>
-                    <div class="spinner-ring"></div>
-                    <div class="spinner-ring"></div>
+                    <div class="bull-loader" aria-hidden="true">
+                        <div class="bull-loader-bars">
+                            <span class="bull-bar bull-bar-1"></span>
+                            <span class="bull-bar bull-bar-2"></span>
+                            <span class="bull-bar bull-bar-3"></span>
+                        </div>
+                        <svg class="bull-loader-arrow" viewBox="0 0 100 70" fill="none">
+                            <path d="M10 58 L38 40 L56 46 L82 16" />
+                            <path d="M74 16 H82 V24" />
+                        </svg>
+                    </div>
                 </div>
                 <h2 class="loading-title">Analyzing <span id="loading-symbol"></span></h2>
                 <p class="loading-subtitle" id="loading-status">Fetching 5 years of financial data...</p>
@@ -147,6 +160,9 @@
                     </div>
                 </div>
                 <div class="bucket-main">
+                    <div id="portfolio-longterm-summary" class="portfolio-longterm-summary hidden">
+                        <!-- Portfolio-level long-term allocation view -->
+                    </div>
                     <div id="bucket-analysis-placeholder" class="bucket-analysis-placeholder">
                         <div class="placeholder-icon">📊</div>
                         <h3>Portfolio Intelligence</h3>
@@ -163,8 +179,9 @@
         <!-- Market Insights Section -->
         <section id="insights-section" class="section hidden">
             <div class="hero-content">
-                <h1 class="hero-title">Market <span class="gradient-text">Intelligence</span></h1>
-                <p class="hero-subtitle">Top 10 daily financial insights with sector analysis and stock opportunities.
+                <h1 class="hero-title">Top 10 Daily <span class="gradient-text">Market Intelligence</span></h1>
+                <p class="hero-subtitle">Daily financial news for Kautilya: affected sectors, impacted stocks, and fast
+                    research candidates for portfolio decisions.
                 </p>
             </div>
 
@@ -174,8 +191,26 @@
                 <p>Analyzing headlines for sector impacts and institutional opportunities.</p>
             </div>
 
-            <div id="insights-grid" class="insights-grid">
-                <!-- AI dynamic insights cards will be rendered here -->
+            <div id="insights-summary" class="insights-summary hidden">
+                <!-- Summary stats (top sectors, sentiment split, watchlist candidates) -->
+            </div>
+
+            <div class="insights-subtabs" id="insights-subtabs">
+                <button type="button" class="insights-subtab active" data-insights-tab="news">Top News</button>
+                <button type="button" class="insights-subtab" data-insights-tab="gainers">Top 10 Gainers Today</button>
+            </div>
+
+            <div id="insights-news-pane" class="insights-pane">
+                <div id="insights-grid" class="insights-grid">
+                    <!-- AI dynamic insights cards will be rendered here -->
+                </div>
+            </div>
+
+            <div id="insights-gainers-pane" class="insights-pane hidden">
+                <div id="gainers-table-meta" class="gainers-table-meta hidden"></div>
+                <div id="gainers-table-container" class="gainers-table-container">
+                    <!-- Top gainers table rendered here -->
+                </div>
             </div>
         </section>
 
@@ -195,6 +230,15 @@
                         <span class="current-price" id="current-price"></span>
                         <span class="price-change" id="price-change"></span>
                     </div>
+                </div>
+            </div>
+
+            <div class="results-quick-search" id="results-quick-search">
+                <div class="results-quick-search-label">Analyze another stock</div>
+                <div class="results-quick-search-row">
+                    <input type="text" id="results-search-input" class="results-search-input"
+                        placeholder="Enter ticker (e.g., MSFT, NVDA, TSLA)" autocomplete="off">
+                    <button type="button" id="results-search-btn" class="results-search-btn">Analyze</button>
                 </div>
             </div>
 
@@ -221,6 +265,10 @@
                         <span class="rec-date" id="rec-date"></span>
                     </div>
                 </div>
+            </div>
+
+            <div id="score-diagnostics-panel" class="score-diagnostics-panel hidden">
+                <!-- Why score is low / factor drags / data penalties -->
             </div>
 
             <!-- Chart Section -->
@@ -397,9 +445,32 @@
                 <p><strong>Disclaimer:</strong> This analysis is for informational purposes only and does not constitute
                     financial advice.
                     Past performance does not guarantee future results. Always consult with a qualified financial
-                    advisor before making investment decisions.
-                    Data sourced from public financial databases including SEC EDGAR, Yahoo Finance, and news
-                    aggregators.</p>
+                    advisor before making investment decisions.</p>
+            </div>
+        </section>
+
+        <!-- About Section -->
+        <section id="about-section" class="section hidden">
+            <div class="hero-content">
+                <h1 class="hero-title">About <span class="gradient-text">Kautilya</span></h1>
+                <p class="hero-subtitle">
+                    Kautilya is a research-first stock intelligence platform built for disciplined decision support,
+                    combining price behavior, fundamentals, filings, and news signals with risk gates.
+                </p>
+            </div>
+            <div class="about-grid">
+                <div class="about-card">
+                    <h3>What It Does</h3>
+                    <p>Analyzes stocks using technicals, fundamentals, SEC filings, news sentiment, and portfolio risk checks.</p>
+                </div>
+                <div class="about-card">
+                    <h3>How To Use</h3>
+                    <p>Use <strong>Analyze</strong> for single-stock research, <strong>Insights</strong> for daily market scans, and <strong>My Bucket</strong> for portfolio-level monitoring.</p>
+                </div>
+                <div class="about-card">
+                    <h3>Risk Policy</h3>
+                    <p>Recommendations are gated by confidence, data quality, volatility, and regime checks. When risk is high, Kautilya defaults to hold/do nothing.</p>
+                </div>
             </div>
         </section>
     </main>
@@ -407,7 +478,6 @@
     <footer id="app-footer">
         <div class="footer-inner">
             <p>&copy; 2025 Kautilya. AI-Powered Stock Intelligence Platform.</p>
-            <p class="footer-sub">Data from SEC EDGAR, Yahoo Finance & Google News. Not financial advice.</p>
         </div>
     </footer>
 

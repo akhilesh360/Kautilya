@@ -73,6 +73,36 @@ Visit **http://localhost:5000** in your browser.
 
 ---
 
+## 🚀 Deploy (Render)
+
+This repo includes a `render.yaml` blueprint for easy deployment on Render.
+
+### Before Deploying
+
+1. **Rotate your FMP API key** if it was ever shared or exposed.
+2. Set your real `FMP_API_KEY` only in Render environment variables (not in git).
+
+### Deploy Steps (Blueprint)
+
+1. Push this repo to GitHub.
+2. In Render, click **New** → **Blueprint**.
+3. Select your repository.
+4. Render will read `render.yaml` and create the web service.
+5. In Render service settings, add:
+   - `FMP_API_KEY` = your rotated FMP key
+
+### Local Environment Example
+
+Use `.env.example` as a template:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` and set your real `FMP_API_KEY`.
+
+---
+
 ## 📁 Project Structure
 
 ```

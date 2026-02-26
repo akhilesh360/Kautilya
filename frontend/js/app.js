@@ -3,25 +3,42 @@
  * Main application logic
  */
 
-// Auto-detect environment for API routing
-const isLocal = window.location.hostname === 'localhost' || window.location.protocol === 'file:';
-const API_BASE = isLocal ? 'http://localhost:5000/api' : window.location.origin + '/api';
+// API routing: use same-origin by default so local runs work on any port (e.g. 5001/5100).
+const API_BASE = window.location.protocol === 'file:'
+    ? 'http://localhost:5000/api'
+    : `${window.location.origin}/api`;
 
 // State
 let currentData = null;
 let priceChart = null;
 let allHistoricalData = [];
 let portfolioBucket = JSON.parse(localStorage.getItem('kautilya-bucket') || '[]');
+let resultsSectionTemplate = '';
+let currentInsightsTab = 'news';
+const SECTION_PATHS = {
+    search: '/analyze',
+    insights: '/insights',
+    bucket: '/bucket',
+    about: '/about',
+    hero: '/analyze',
+};
 
 // ============================================
 // INITIALIZATION
 // ============================================
 
 document.addEventListener('DOMContentLoaded', () => {
+    const resultsSection = document.getElementById('results-section');
+    if (resultsSection) {
+        resultsSectionTemplate = resultsSection.innerHTML;
+    }
     initSearch();
+    initResultsQuickSearch();
     initQuickPicks();
     initNavigation();
+    initInsightsTabs();
     initBucket();
+    initPageRouting();
 });
 
 function initSearch() {
@@ -59,6 +76,29 @@ function initSearch() {
     });
 }
 
+function initResultsQuickSearch() {
+    // Delegated listeners survive results-section template restoration after error screens.
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('#results-search-btn');
+        if (!btn) return;
+        const input = document.getElementById('results-search-input');
+        const symbol = (input?.value || '').trim().toUpperCase();
+        if (!symbol) return;
+        analyzeStock(symbol);
+    });
+
+    document.addEventListener('keydown', (e) => {
+        const input = e.target;
+        if (!(input instanceof HTMLElement)) return;
+        if (input.id !== 'results-search-input') return;
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const symbol = (input.value || '').trim().toUpperCase();
+        if (!symbol) return;
+        analyzeStock(symbol);
+    });
+}
+
 function initQuickPicks() {
     document.querySelectorAll('.quick-pick-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -72,24 +112,103 @@ function initQuickPicks() {
 function initNavigation() {
     const logo = document.getElementById('logo');
     logo.addEventListener('click', () => {
-        showSection('hero');
+        navigateToSection('search');
     });
 
     document.querySelectorAll('.nav-link').forEach(link => {
         link.addEventListener('click', (e) => {
             e.preventDefault();
             const section = link.dataset.section;
-            if (section === 'search') {
-                showSection('hero');
-            } else if (section === 'insights') {
-                showSection('insights');
-                fetchMarketInsights();
-            } else if (section === 'bucket') {
-                showSection('bucket');
-                renderPortfolioList();
-            }
+            navigateToSection(section || 'search');
         });
     });
+}
+
+function initPageRouting() {
+    window.addEventListener('popstate', () => {
+        showSectionFromPath(window.location.pathname, false);
+    });
+    showSectionFromPath(window.location.pathname, false);
+}
+
+function normalizePath(pathname) {
+    if (!pathname) return '/analyze';
+    let p = pathname.trim();
+    if (p.length > 1 && p.endsWith('/')) p = p.slice(0, -1);
+    return p || '/analyze';
+}
+
+function pathToSection(pathname) {
+    const p = normalizePath(pathname).toLowerCase();
+    if (p === '/' || p === '/analyze') return 'search';
+    if (p === '/insights') return 'insights';
+    if (p === '/bucket') return 'bucket';
+    if (p === '/about') return 'about';
+    return 'search';
+}
+
+function sectionToPath(section) {
+    return SECTION_PATHS[section] || '/analyze';
+}
+
+function navigateToSection(section, push = true) {
+    const path = sectionToPath(section);
+    if (push && window.location.pathname !== path) {
+        window.history.pushState({}, '', path);
+    }
+    showSectionFromPath(path, false);
+}
+
+function showSectionFromPath(pathname, pushState = false) {
+    const section = pathToSection(pathname);
+    if (pushState) {
+        navigateToSection(section, true);
+        return;
+    }
+    if (section === 'search') {
+        showSection('hero');
+    } else if (section === 'insights') {
+        showSection('insights');
+        loadInsightsTab(currentInsightsTab);
+    } else if (section === 'bucket') {
+        showSection('bucket');
+        renderPortfolioList();
+        renderPortfolioLongTermSummary();
+    } else if (section === 'about') {
+        showSection('about');
+    }
+}
+
+function initInsightsTabs() {
+    document.querySelectorAll('[data-insights-tab]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const tab = btn.dataset.insightsTab || 'news';
+            setInsightsTab(tab);
+            loadInsightsTab(tab);
+        });
+    });
+}
+
+function setInsightsTab(tab) {
+    currentInsightsTab = tab === 'gainers' ? 'gainers' : 'news';
+    document.querySelectorAll('[data-insights-tab]').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.insightsTab === currentInsightsTab);
+    });
+
+    const newsPane = document.getElementById('insights-news-pane');
+    const gainersPane = document.getElementById('insights-gainers-pane');
+    const summary = document.getElementById('insights-summary');
+    if (newsPane) newsPane.classList.toggle('hidden', currentInsightsTab !== 'news');
+    if (gainersPane) gainersPane.classList.toggle('hidden', currentInsightsTab !== 'gainers');
+    if (summary) summary.classList.toggle('hidden', currentInsightsTab !== 'news');
+}
+
+function loadInsightsTab(tab) {
+    if (tab === 'gainers') {
+        fetchTopGainersToday();
+    } else {
+        fetchMarketInsights();
+    }
 }
 
 // ============================================
@@ -236,11 +355,14 @@ async function analyzeStock(symbol) {
 // ============================================
 
 function renderResults(data) {
+    restoreResultsSectionIfNeeded();
+
     const analysis = data.analysis;
     const info = data.companyInfo;
 
     renderCompanyHeader(info);
     renderRecommendation(analysis);
+    renderScoreDiagnostics(analysis);
     renderPriceTargets(analysis.priceTargets);
     renderAlphaSignals(analysis);
     renderScores(analysis.scores);
@@ -257,7 +379,25 @@ function renderResults(data) {
     initChartPeriods();
 }
 
+function restoreResultsSectionIfNeeded() {
+    const resultsSection = document.getElementById('results-section');
+    if (!resultsSection || !resultsSectionTemplate) return;
+
+    // showError() replaces the entire section markup; restore the original template before rendering again.
+    if (!document.getElementById('company-name') || !document.getElementById('scores-grid')) {
+        resultsSection.innerHTML = resultsSectionTemplate;
+        if (priceChart) {
+            try { priceChart.destroy(); } catch (e) { }
+            priceChart = null;
+        }
+    }
+}
+
 function renderCompanyHeader(info) {
+    const quickInput = document.getElementById('results-search-input');
+    if (quickInput && info?.symbol) {
+        quickInput.value = info.symbol;
+    }
     document.getElementById('company-name').innerHTML = `
         ${info.name || info.symbol} <span class="header-symbol-inline">${info.symbol}</span>
     `;
@@ -275,11 +415,12 @@ function renderCompanyHeader(info) {
 
 function renderRecommendation(analysis) {
     const rec = analysis.recommendation || { action: 'UNKNOWN', color: '#999', reasoning: 'Insufficient data' };
+    const displayAction = rec.action === 'NO TRADE' ? 'HOLD (Do Nothing)' : rec.action;
     const badge = document.getElementById('rec-badge');
     badge.style.background = (rec.color || '#999') + '22';
     badge.style.color = rec.color || '#999';
     badge.style.border = `2px solid ${rec.color || '#999'}`;
-    document.getElementById('rec-action').textContent = rec.action;
+    document.getElementById('rec-action').textContent = displayAction;
 
     // Score ring
     const score = analysis.overallScore;
@@ -299,16 +440,31 @@ function renderRecommendation(analysis) {
     document.getElementById('rec-score-value').textContent = Math.round(score);
     document.getElementById('rec-score-value').style.color = scoreColor;
 
-    document.getElementById('rec-reasoning').textContent = rec.reasoning;
-    document.getElementById('rec-date').textContent = `Analysis Date: ${analysis.analysisDate}`;
+    const reasoning = rec.reasoning || 'Insufficient data';
+    document.getElementById('rec-reasoning').textContent = reasoning;
+    const extraMeta = [];
+    if (analysis.confidenceScore !== undefined) {
+        extraMeta.push(`Confidence: ${analysis.confidenceScore} (${analysis.confidenceLabel || 'N/A'})`);
+    }
+    if (analysis.dataQuality?.score !== undefined) {
+        extraMeta.push(`Data Quality: ${analysis.dataQuality.score} (${analysis.dataQuality.label || 'N/A'})`);
+    }
+    if (analysis.regime?.name) {
+        extraMeta.push(`Regime: ${analysis.regime.name}`);
+    }
+    if (analysis.longTermQualityScore !== undefined) {
+        extraMeta.push(`Investment View: ${analysis.longTermQualityLabel || 'N/A'} (${analysis.longTermQualityScore})`);
+    }
+    document.getElementById('rec-date').textContent = `Analysis Date: ${analysis.analysisDate}${extraMeta.length ? ' • ' + extraMeta.join(' • ') : ''}`;
 }
 
 function renderPriceTargets(targets) {
     const grid = document.getElementById('price-targets-grid');
     const periods = [
-        { key: '30day', label: '30-Day Target', icon: '📅' },
-        { key: '6month', label: '6-Month Target', icon: '📊' },
-        { key: '1year', label: '1-Year Target', icon: '🎯' },
+        { key: '30day', label: '30-Day Target' },
+        { key: '6month', label: '6-Month Target' },
+        { key: '1year', label: '1-Year Target' },
+        { key: '5year', label: '5-Year Target' },
     ];
 
     grid.innerHTML = periods.map(p => {
@@ -317,22 +473,82 @@ function renderPriceTargets(targets) {
         const confidenceClass = `confidence-${t.confidence || 'medium'}`;
         return `
             <div class="target-card animate-in">
-                <div class="target-period">${p.icon} ${p.label}</div>
+                <div class="target-period">${p.label}</div>
                 <div class="target-price">$${(t.target || 0).toFixed(2)}</div>
                 <div class="target-upside ${upsideClass}">
                     ${(t.upside || 0) >= 0 ? '▲' : '▼'} ${(t.upside || 0).toFixed(2)}%
                 </div>
                 <div class="target-range">Range: $${(t.low || 0).toFixed(2)} — $${(t.high || 0).toFixed(2)}</div>
+                ${p.key === '5year' && t.benchmark ? `
+                    <div class="target-range" style="margin-top:4px">
+                        vs ${t.benchmark.benchmarkSymbol || 'Benchmark'}: ${(t.benchmark.relativeUpsideVsBenchmarkPct ?? 0) >= 0 ? '+' : ''}${(t.benchmark.relativeUpsideVsBenchmarkPct ?? 0).toFixed?.(2) ?? t.benchmark.relativeUpsideVsBenchmarkPct}% relative
+                    </div>
+                ` : ''}
                 <span class="target-confidence ${confidenceClass}">${t.confidence || 'N/A'} confidence</span>
             </div>
         `;
     }).join('');
 }
 
+function renderScoreDiagnostics(analysis) {
+    const panel = document.getElementById('score-diagnostics-panel');
+    if (!panel) return;
+    const diag = analysis?.scoreDiagnostics;
+    if (!diag) {
+        panel.classList.add('hidden');
+        panel.innerHTML = '';
+        return;
+    }
+
+    const drags = (diag.topDrags || []).map(d => `
+        <div class="diag-item">
+            <span class="diag-name">${d.factor}</span>
+            <span class="diag-val factor-negative">${d.score} (${d.weightedDelta})</span>
+        </div>
+    `).join('');
+    const supports = (diag.topSupports || []).map(d => `
+        <div class="diag-item">
+            <span class="diag-name">${d.factor}</span>
+            <span class="diag-val factor-positive">${d.score} (+${d.weightedDelta})</span>
+        </div>
+    `).join('');
+    const penalties = (diag.missingDataPenalties || []).map(p => `
+        <li>${p.name}: ${p.status} (${p.detail || 'n/a'})</li>
+    `).join('');
+    const gates = (diag.gatingReasons || []).map(g => `<li>${g}</li>`).join('');
+
+    panel.innerHTML = `
+        <div class="score-diagnostics-header">
+            <h3>Why Score Is ${diag.isLowScore ? 'Low' : 'What Drives the Score'}</h3>
+            <p>${diag.headline || ''}</p>
+        </div>
+        <div class="score-diagnostics-grid">
+            <div class="score-diagnostics-card">
+                <div class="score-diagnostics-title">Factor Drags</div>
+                ${drags || '<div style="color:var(--text-muted)">No major negative drags.</div>'}
+            </div>
+            <div class="score-diagnostics-card">
+                <div class="score-diagnostics-title">Factor Supports</div>
+                ${supports || '<div style="color:var(--text-muted)">No strong supports yet.</div>'}
+            </div>
+            <div class="score-diagnostics-card">
+                <div class="score-diagnostics-title">Data / Coverage Penalties</div>
+                ${penalties ? `<ul class="diag-list">${penalties}</ul>` : '<div style="color:var(--text-muted)">No material data penalties.</div>'}
+            </div>
+            <div class="score-diagnostics-card">
+                <div class="score-diagnostics-title">Risk Gate Notes</div>
+                ${gates ? `<ul class="diag-list">${gates}</ul>` : '<div style="color:var(--text-muted)">No active risk gate overrides.</div>'}
+            </div>
+        </div>
+    `;
+    panel.classList.remove('hidden');
+}
+
 function renderAlphaSignals(analysis) {
     const container = document.getElementById('alpha-signals-container');
     const badge = document.getElementById('conviction-badge');
     const signals = analysis.alphaSignals || [];
+    const filingEdge = analysis.secEdge || null;
 
     // Render Badge
     if (analysis.convictionScore) {
@@ -342,12 +558,26 @@ function renderAlphaSignals(analysis) {
         badge.style.display = 'none';
     }
 
-    if (signals.length === 0) {
-        container.innerHTML = '<div class="alpha-empty-state">No specific high-conviction alpha patterns detected for this quarter.</div>';
-        return;
-    }
+    const filingPanel = filingEdge && !filingEdge.error ? `
+        <div class="alpha-card animate-in">
+            <div class="alpha-header">
+                <span class="alpha-type">Filing Edge (10-K/10-Q)</span>
+                <span class="alpha-strength" style="color:${(filingEdge.edgeScore || 0) >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)'}">
+                    ${typeof filingEdge.edgeScore === 'number' ? (filingEdge.edgeScore >= 0 ? '+' : '') + filingEdge.edgeScore.toFixed(1) : 'N/A'}
+                </span>
+            </div>
+            <h4 class="alpha-title">${escapeHtml(filingEdge.edgeLabel || 'Filing Drift Analysis')}</h4>
+            <p class="alpha-detail">${escapeHtml(filingEdge.edge_summary || 'No filing summary available.')}</p>
+            ${Array.isArray(filingEdge.filingSignals) && filingEdge.filingSignals.length ? `
+                <div class="alpha-edge">
+                    <strong>Key Filing Signals:</strong>
+                    ${filingEdge.filingSignals.slice(0, 4).map(f => `${escapeHtml(f.section || 'section')}: ${escapeHtml(f.detail || f.type || 'signal')}`).join(' • ')}
+                </div>
+            ` : ''}
+        </div>
+    ` : '';
 
-    container.innerHTML = signals.map(s => `
+    const alphaCards = signals.map(s => `
         <div class="alpha-card animate-in">
             <div class="alpha-header">
                 <span class="alpha-type">${s.type}</span>
@@ -360,28 +590,35 @@ function renderAlphaSignals(analysis) {
             </div>
         </div>
     `).join('');
+
+    if (!filingPanel && signals.length === 0) {
+        container.innerHTML = '<div class="alpha-empty-state">No specific high-conviction alpha patterns or filing-edge shifts detected for this period.</div>';
+        return;
+    }
+
+    container.innerHTML = `${filingPanel}${alphaCards}`;
 }
 
 function renderScores(scores) {
     const grid = document.getElementById('scores-grid');
     const scoreNames = {
-        fundamental: { label: 'Fundamental', icon: '📋' },
-        technical: { label: 'Technical', icon: '📈' },
-        sentiment: { label: 'Sentiment', icon: '💬' },
-        valuation: { label: 'Valuation', icon: '💎' },
-        growth: { label: 'Growth', icon: '🚀' },
-        institutional: { label: 'Institutional', icon: '🏛️' },
+        fundamental: { label: 'Fundamental' },
+        technical: { label: 'Technical' },
+        sentiment: { label: 'Sentiment' },
+        valuation: { label: 'Valuation' },
+        growth: { label: 'Growth' },
+        institutional: { label: 'Institutional' },
     };
 
     grid.innerHTML = Object.entries(scores).map(([key, score]) => {
-        const info = scoreNames[key] || { label: key, icon: '📊' };
+        const info = scoreNames[key] || { label: key };
         const color = score.score >= 70 ? 'var(--accent-emerald)' : score.score >= 50 ? 'var(--accent-amber)' : 'var(--accent-rose)';
         const factors = (score.factors || []).slice(0, 4);
 
         return `
             <div class="score-card animate-in">
                 <div class="score-card-header">
-                    <span class="score-card-title">${info.icon} ${info.label}</span>
+                    <span class="score-card-title">${info.label}</span>
                     <span class="score-value" style="color: ${color}">${Math.round(score.score)}</span>
                 </div>
                 <div class="score-bar">
@@ -417,13 +654,19 @@ function renderChart(historicalData) {
     const labels = data.map(d => d.date);
     const prices = data.map(d => d.close);
     const volumes = data.map(d => d.volume);
+    const firstPrice = Number(prices[0] || 0);
+    const lastPrice = Number(prices[prices.length - 1] || 0);
+    const isUp = lastPrice >= firstPrice;
+    const lineColor = isUp ? '#10b981' : '#f43f5e';
+    const fillTop = isUp ? 'rgba(16, 185, 129, 0.18)' : 'rgba(244, 63, 94, 0.16)';
+    const fillBottom = isUp ? 'rgba(16, 185, 129, 0.02)' : 'rgba(244, 63, 94, 0.02)';
 
     const ctx = canvas.getContext('2d');
 
     // Create gradient
     const gradient = ctx.createLinearGradient(0, 0, 0, 400);
-    gradient.addColorStop(0, 'rgba(99, 102, 241, 0.3)');
-    gradient.addColorStop(1, 'rgba(99, 102, 241, 0.01)');
+    gradient.addColorStop(0, fillTop);
+    gradient.addColorStop(1, fillBottom);
 
     priceChart = new Chart(ctx, {
         type: 'line',
@@ -432,15 +675,15 @@ function renderChart(historicalData) {
             datasets: [{
                 label: 'Price',
                 data: prices,
-                borderColor: '#6366f1',
+                borderColor: lineColor,
                 backgroundColor: gradient,
                 borderWidth: 2,
                 fill: true,
                 tension: 0.2,
                 pointRadius: 0,
                 pointHoverRadius: 6,
-                pointHoverBackgroundColor: '#6366f1',
-                pointHoverBorderColor: '#fff',
+                pointHoverBackgroundColor: lineColor,
+                pointHoverBorderColor: '#ffffff',
                 pointHoverBorderWidth: 2,
             }]
         },
@@ -456,10 +699,10 @@ function renderChart(historicalData) {
                     display: false,
                 },
                 tooltip: {
-                    backgroundColor: 'rgba(18, 18, 26, 0.95)',
-                    titleColor: '#f1f1f5',
-                    bodyColor: '#a1a1b5',
-                    borderColor: 'rgba(99, 102, 241, 0.3)',
+                    backgroundColor: 'rgba(255, 255, 255, 0.98)',
+                    titleColor: '#0f172a',
+                    bodyColor: '#475569',
+                    borderColor: isUp ? 'rgba(16, 185, 129, 0.25)' : 'rgba(244, 63, 94, 0.25)',
                     borderWidth: 1,
                     padding: 12,
                     displayColors: false,
@@ -472,10 +715,10 @@ function renderChart(historicalData) {
             scales: {
                 x: {
                     grid: {
-                        color: 'rgba(255,255,255,0.04)',
+                        color: 'rgba(15,23,42,0.05)',
                     },
                     ticks: {
-                        color: '#6b6b80',
+                        color: '#64748b',
                         font: { family: 'JetBrains Mono', size: 10 },
                         maxTicksLimit: 12,
                         maxRotation: 0,
@@ -485,10 +728,10 @@ function renderChart(historicalData) {
                 y: {
                     position: 'right',
                     grid: {
-                        color: 'rgba(255,255,255,0.04)',
+                        color: 'rgba(15,23,42,0.05)',
                     },
                     ticks: {
-                        color: '#6b6b80',
+                        color: '#64748b',
                         font: { family: 'JetBrains Mono', size: 10 },
                         callback: (val) => '$' + val.toFixed(0),
                     },
@@ -878,7 +1121,22 @@ async function filterChartData(period) {
         default: cutoff = new Date('1900-01-01');
     }
 
-    const filtered = allHistoricalData.filter(d => new Date(d.date) >= cutoff);
+    const parseChartDate = (value) => {
+        if (!value) return null;
+        // Handles YYYY-MM-DD and YYYY-MM-DD HH:mm consistently across browsers.
+        const normalized = String(value).includes(' ') ? String(value).replace(' ', 'T') : `${value}T00:00:00`;
+        const dt = new Date(normalized);
+        return Number.isNaN(dt.getTime()) ? null : dt;
+    };
+
+    let filtered = allHistoricalData.filter(d => {
+        const dt = parseChartDate(d.date);
+        return dt && dt >= cutoff;
+    });
+    if (!filtered.length && ['3y', '5y', 'max'].includes(period)) {
+        // Fallback to available history instead of blank chart if parsing or range is limited.
+        filtered = allHistoricalData.slice();
+    }
     updateChartDisplay(filtered);
 }
 
@@ -899,8 +1157,22 @@ function updateChartDisplay(filtered) {
     }
 
     if (filtered.length > 0 && priceChart) {
+        const startPrice = Number(filtered[0].close || 0);
+        const endPrice = Number(filtered[filtered.length - 1].close || 0);
+        const isUp = endPrice >= startPrice;
+        const lineColor = isUp ? '#10b981' : '#f43f5e';
+        const ctx = priceChart.ctx;
+        let gradient = lineColor;
+        if (ctx && typeof ctx.createLinearGradient === 'function') {
+            gradient = ctx.createLinearGradient(0, 0, 0, 400);
+            gradient.addColorStop(0, isUp ? 'rgba(16, 185, 129, 0.18)' : 'rgba(244, 63, 94, 0.16)');
+            gradient.addColorStop(1, isUp ? 'rgba(16, 185, 129, 0.02)' : 'rgba(244, 63, 94, 0.02)');
+        }
         priceChart.data.labels = filtered.map(d => d.date);
         priceChart.data.datasets[0].data = filtered.map(d => d.close);
+        priceChart.data.datasets[0].borderColor = lineColor;
+        priceChart.data.datasets[0].backgroundColor = gradient;
+        priceChart.data.datasets[0].pointHoverBackgroundColor = lineColor;
         priceChart.update('none');
     }
 }
@@ -920,9 +1192,20 @@ function initStatementTabs(financials) {
 // ============================================
 
 function showSection(section) {
-    document.getElementById('hero-section').classList.add('hidden');
-    document.getElementById('loading-section').classList.add('hidden');
-    document.getElementById('results-section').classList.add('hidden');
+    ['hero-section', 'loading-section', 'results-section', 'bucket-section', 'insights-section', 'about-section']
+        .forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('hidden');
+        });
+
+    document.querySelectorAll('.nav-link').forEach((link) => {
+        const target = link.dataset.section;
+        const isActive =
+            (section === 'hero' && target === 'search') ||
+            (section === 'results' && target === 'search') ||
+            target === section;
+        link.classList.toggle('active', !!isActive);
+    });
 
     // Reset loading steps
     document.querySelectorAll('.loading-step').forEach(s => {
@@ -942,13 +1225,12 @@ function showSection(section) {
             break;
         case 'bucket':
             document.getElementById('bucket-section').classList.remove('hidden');
-            document.getElementById('hero-section').classList.add('hidden');
-            document.getElementById('results-section').classList.add('hidden');
             break;
         case 'insights':
             document.getElementById('insights-section').classList.remove('hidden');
-            document.getElementById('hero-section').classList.add('hidden');
-            document.getElementById('results-section').classList.add('hidden');
+            break;
+        case 'about':
+            document.getElementById('about-section').classList.remove('hidden');
             break;
     }
 }
@@ -1038,6 +1320,8 @@ function renderPortfolioList() {
             </div>
         </div>
     `).join('');
+
+    renderPortfolioLongTermSummary();
 }
 
 function removeFromBucket(id) {
@@ -1050,6 +1334,73 @@ function removeFromBucket(id) {
     const placeholder = document.getElementById('bucket-analysis-placeholder');
     view.classList.add('hidden');
     placeholder.classList.remove('hidden');
+
+    renderPortfolioLongTermSummary();
+}
+
+async function renderPortfolioLongTermSummary() {
+    const container = document.getElementById('portfolio-longterm-summary');
+    if (!container) return;
+    if (!portfolioBucket.length) {
+        container.classList.add('hidden');
+        container.innerHTML = '';
+        return;
+    }
+
+    container.classList.remove('hidden');
+    container.innerHTML = `<div class="placeholder-icon" style="font-size:1.4rem">⏳</div><p style="color:var(--text-muted)">Building long-term allocation view...</p>`;
+
+    try {
+        const res = await fetch(`${API_BASE}/portfolio/long-term-view`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                aumUsd: 1000000,
+                positions: portfolioBucket.map(p => ({ symbol: p.symbol, qty: p.qty, avgPrice: p.avgPrice }))
+            })
+        });
+        if (!res.ok) throw new Error(`Long-term view failed (${res.status})`);
+        const data = await res.json();
+
+        const rows = (data.positions || []).slice(0, 8);
+        const guardrails = data.guardrails || {};
+        container.innerHTML = `
+            <div class="portfolio-longterm-header">
+                <div>
+                    <h3>Long-Term Allocation View</h3>
+                    <p>5Y-oriented ranking by quality, benchmark-relative upside, confidence, and data quality.</p>
+                </div>
+                <div class="portfolio-longterm-status ${String(guardrails.status || 'PASS').toLowerCase()}">${guardrails.status || 'N/A'}</div>
+            </div>
+            <div class="portfolio-longterm-table">
+                ${rows.map(r => `
+                    <div class="portfolio-longterm-row">
+                        <div>
+                            <div class="portfolio-longterm-symbol">${r.symbol}</div>
+                            <div class="portfolio-longterm-meta">${r.sector || 'Unknown'} • ${r.longTermQualityLabel || 'N/A'} (${r.longTermQualityScore ?? 'N/A'})</div>
+                        </div>
+                        <div class="portfolio-longterm-metrics">
+                            <span>Now: ${r.currentWeightPct ?? 0}%</span>
+                            <span>Target: ${r.targetWeightPct ?? 0}%</span>
+                            <span class="${(r.weightGapPct ?? 0) >= 0 ? 'factor-positive' : 'factor-negative'}">
+                                Gap: ${(r.weightGapPct ?? 0) >= 0 ? '+' : ''}${r.weightGapPct ?? 0}%
+                            </span>
+                            <span>5Y: ${(r.fiveYearTarget?.upside ?? 0) >= 0 ? '+' : ''}${(r.fiveYearTarget?.upside ?? 0).toFixed?.(1) ?? r.fiveYearTarget?.upside}%</span>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+            ${(guardrails.breaches || []).length ? `
+                <div class="portfolio-longterm-breaches">
+                    <strong>Guardrail breaches:</strong>
+                    <ul class="diag-list">${(guardrails.breaches || []).slice(0, 4).map(b => `<li>${b.detail}</li>`).join('')}</ul>
+                </div>
+            ` : ''}
+        `;
+    } catch (err) {
+        console.error('Long-term allocation view failed:', err);
+        container.innerHTML = `<div class="placeholder-icon">⚠️</div><p style="color:var(--text-muted)">${err.message}</p>`;
+    }
 }
 
 async function analyzePortfolioItem(symbol, avgPrice, qty, id) {
@@ -1087,17 +1438,46 @@ async function analyzePortfolioItem(symbol, avgPrice, qty, id) {
         const pnl = currentVal - invested;
         const pnlPct = (pnl / invested) * 100;
         const colorClass = pnl >= 0 ? 'positive' : 'negative';
+        const confidenceScore = analysis.confidenceScore ?? analysis.recommendation?.confidenceScore ?? 'N/A';
+        const confidenceLabel = analysis.confidenceLabel ?? analysis.recommendation?.confidenceLabel ?? 'N/A';
+        const dataQualityScore = analysis.dataQuality?.score ?? analysis.recommendation?.dataQualityScore ?? 'N/A';
+        const dataQualityLabel = analysis.dataQuality?.label ?? 'N/A';
 
-        // Recommendation logic
-        let actionTitle = "Hold Position";
-        let actionDesc = "Your current position is well-aligned with neutral market sentiment and current valuations.";
+        let guardrails = null;
+        try {
+            const grRes = await fetch(`${API_BASE}/portfolio/guardrails`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    aumUsd: 1000000,
+                    positions: portfolioBucket.map(p => ({
+                        symbol: p.symbol,
+                        qty: p.qty,
+                        avgPrice: p.avgPrice
+                    }))
+                })
+            });
+            if (grRes.ok) {
+                guardrails = await grRes.json();
+            }
+        } catch (e) {
+            console.warn('Guardrails check failed:', e);
+        }
 
-        if (analysis.overallScore >= 70) {
+        // Recommendation logic (maps internal NO TRADE -> HOLD (Do Nothing))
+        const recAction = analysis.recommendation?.action || 'HOLD';
+        let actionTitle = "Hold (Do Nothing)";
+        let actionDesc = "Risk gates or mixed signals suggest waiting for a better setup before changing this position.";
+
+        if (recAction === 'STRONG BUY' || recAction === 'BUY') {
             actionTitle = "Increase Position";
             actionDesc = "Strong fundamental and technical indicators suggest significant upside potential. Consider adding to your stakes.";
-        } else if (analysis.overallScore <= 45) {
+        } else if (recAction === 'SELL' || recAction === 'STRONG SELL') {
             actionTitle = "Decrease / Trim Position";
             actionDesc = "Warning: Multiple bearish indicators and risks detected. Consider trimming your exposure to protect capital.";
+        } else if (recAction === 'HOLD') {
+            actionTitle = "Hold Position";
+            actionDesc = "Signals are mixed. Maintain position size while monitoring risk and confidence changes.";
         }
 
         view.innerHTML = `
@@ -1117,14 +1497,14 @@ async function analyzePortfolioItem(symbol, avgPrice, qty, id) {
 
             <div class="brief-grid animate-in" style="animation-delay:0.1s">
                 <div class="brief-card">
-                    <div class="brief-card-title">✅ Strategic Pros</div>
+                    <div class="brief-card-title">Strategic Pros</div>
                     <ul class="brief-list">
                         ${(analysis.scores.fundamental.factors || []).filter(f => f.impact === 'positive').slice(0, 3).map(f => `<li class="brief-list-item pros-item">${f.factor}</li>`).join('')}
                         ${(analysis.scores.technical.factors || []).filter(f => f.impact === 'positive').slice(0, 2).map(f => `<li class="brief-list-item pros-item">${f.factor}</li>`).join('')}
                     </ul>
                 </div>
                 <div class="brief-card">
-                    <div class="brief-card-title">❌ Risks & Cons</div>
+                    <div class="brief-card-title">Risks & Cons</div>
                     <ul class="brief-list">
                         ${analysis.riskFactors.slice(0, 4).map(r => `<li class="brief-list-item cons-item">${r.risk}</li>`).join('')}
                     </ul>
@@ -1133,7 +1513,7 @@ async function analyzePortfolioItem(symbol, avgPrice, qty, id) {
 
             <div class="brief-grid animate-in" style="animation-delay:0.2s">
                 <div class="brief-card">
-                    <div class="brief-card-title">🎯 Price Forecasts</div>
+                    <div class="brief-card-title">Price Forecasts</div>
                     <div class="forecast-grid">
                         <div class="forecast-item">
                             <div class="forecast-label">6-Month Target</div>
@@ -1152,7 +1532,7 @@ async function analyzePortfolioItem(symbol, avgPrice, qty, id) {
                     </div>
                 </div>
                 <div class="brief-card">
-                    <div class="brief-card-title">🛡️ Risk Assessment</div>
+                    <div class="brief-card-title">Risk Assessment</div>
                     <div class="risk-level" style="background:${analysis.overallScore >= 70 ? 'var(--accent-emerald)22' : 'var(--accent-rose)22'}; color:${analysis.overallScore >= 70 ? 'var(--accent-emerald)' : 'var(--accent-rose)'}">
                         ${analysis.overallScore >= 70 ? 'Low Risk Selection' : 'High Risk Exposure'}
                     </div>
@@ -1160,8 +1540,25 @@ async function analyzePortfolioItem(symbol, avgPrice, qty, id) {
                         Current volatility is ${analysis.scores.technical.indicators.volatility ? (analysis.scores.technical.indicators.volatility * 100).toFixed(1) : 'N/A'}% annually.
                         Major support detected at $${analysis.scores.technical.indicators.support?.toFixed(2) || 'N/A'}.
                     </p>
+                    <p style="font-size:0.85rem;color:var(--text-secondary); line-height:1.5; margin-top:8px">
+                        Confidence: <strong style="color:var(--text-primary)">${confidenceScore}</strong> (${confidenceLabel}) • Data Quality:
+                        <strong style="color:var(--text-primary)">${dataQualityScore}</strong> (${dataQualityLabel})
+                    </p>
                 </div>
             </div>
+
+            ${guardrails ? `
+            <div class="brief-card animate-in" style="animation-delay:0.25s; margin-top:16px">
+                <div class="brief-card-title">🏦 Portfolio Guardrails (${guardrails.status})</div>
+                <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:10px">
+                    Exposure: ${guardrails.portfolio?.grossExposurePct ?? 'N/A'}% • Positions: ${guardrails.portfolio?.positionCount ?? 0}
+                </p>
+                ${(guardrails.breaches || []).length ? `
+                    <ul class="brief-list">
+                        ${(guardrails.breaches || []).slice(0, 5).map(b => `<li class="brief-list-item cons-item">${b.detail}</li>`).join('')}
+                    </ul>
+                ` : `<div style="color:var(--accent-emerald);font-weight:700">No guardrail breaches detected.</div>`}
+            </div>` : ''}
 
             <div class="action-banner animate-in" style="animation-delay:0.3s">
                 <div class="action-title">💡 Position Advice: ${actionTitle}</div>
@@ -1170,6 +1567,9 @@ async function analyzePortfolioItem(symbol, avgPrice, qty, id) {
             
             <div style="margin-top:40px; text-align:center" class="animate-in" style="animation-delay:0.4s">
                 <button onclick="analyzeStock('${symbol}')" class="search-btn" style="padding:12px 32px; border-radius:12px">View Deep Engine Report</button>
+                <button onclick="logPaperDecision('${symbol}')" class="search-btn" style="padding:12px 24px; border-radius:12px; margin-left:8px">
+                    Log Paper Decision
+                </button>
             </div>
         `;
 
@@ -1182,19 +1582,135 @@ async function analyzePortfolioItem(symbol, avgPrice, qty, id) {
     }
 }
 
+async function logPaperDecision(symbol) {
+    try {
+        const payload = {
+            symbol,
+            timestampLocal: new Date().toISOString(),
+            source: 'frontend_manual',
+            bucket: portfolioBucket,
+            currentAnalysis: currentData?.analysis || null,
+            currentCompanyInfo: currentData?.companyInfo || null
+        };
+        const res = await fetch(`${API_BASE}/paper-trade/log`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ eventType: 'paper_decision', payload })
+        });
+        if (!res.ok) throw new Error(`Paper log failed (${res.status})`);
+        alert(`Paper-trade decision logged for ${symbol}.`);
+    } catch (err) {
+        console.error('Paper-trade log failed:', err);
+        alert(`Failed to log paper trade: ${err.message}`);
+    }
+}
+
 // ============================================
 // MARKET INSIGHTS LOGIC
 // ============================================
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatInsightTimestamp(value) {
+    if (!value) return 'Latest';
+    const parsed = new Date(value.replace(' ', 'T'));
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+}
+
+function renderInsightsSummary(insights) {
+    const summaryEl = document.getElementById('insights-summary');
+    if (!summaryEl) return;
+
+    if (!Array.isArray(insights) || insights.length === 0) {
+        summaryEl.classList.add('hidden');
+        summaryEl.innerHTML = '';
+        return;
+    }
+
+    const sentimentCounts = insights.reduce((acc, item) => {
+        const key = ['positive', 'negative', 'neutral'].includes(item?.sentiment) ? item.sentiment : 'neutral';
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+    }, { positive: 0, negative: 0, neutral: 0 });
+
+    const sectorCounts = {};
+    const stockSet = new Set();
+    for (const item of insights) {
+        (item?.sectors || []).forEach((sector) => {
+            sectorCounts[sector] = (sectorCounts[sector] || 0) + 1;
+        });
+        (item?.stocks || []).forEach((ticker) => stockSet.add(ticker));
+    }
+
+    const topSectors = Object.entries(sectorCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([name, count]) => `<span class="sector-tag">${escapeHtml(name)} (${count})</span>`)
+        .join('');
+
+    summaryEl.innerHTML = `
+        <div class="insight-summary-card">
+            <div class="insight-summary-label">Headlines Tracked</div>
+            <div class="insight-summary-value">${insights.length}</div>
+            <div class="insight-summary-sub">Top financial stories of the day</div>
+        </div>
+        <div class="insight-summary-card">
+            <div class="insight-summary-label">Sentiment Split</div>
+            <div class="insight-summary-value">
+                <span class="is-positive">${sentimentCounts.positive}</span>
+                <span class="insight-summary-divider">/</span>
+                <span class="is-negative">${sentimentCounts.negative}</span>
+                <span class="insight-summary-divider">/</span>
+                <span class="is-neutral">${sentimentCounts.neutral}</span>
+            </div>
+            <div class="insight-summary-sub">Bullish / Bearish / Neutral</div>
+        </div>
+        <div class="insight-summary-card insight-summary-card--wide">
+            <div class="insight-summary-label">Most Affected Sectors</div>
+            <div class="insight-summary-tags">${topSectors || '<span class="sector-tag">General Market</span>'}</div>
+            <div class="insight-summary-sub">${stockSet.size} unique stocks flagged for follow-up</div>
+        </div>
+    `;
+    summaryEl.classList.remove('hidden');
+}
+
 async function fetchMarketInsights() {
     const grid = document.getElementById('insights-grid');
     const loading = document.getElementById('insights-loading');
+    const summary = document.getElementById('insights-summary');
+    const gainersMeta = document.getElementById('gainers-table-meta');
+    const gainersTable = document.getElementById('gainers-table-container');
 
     grid.innerHTML = '';
+    if (summary) {
+        summary.classList.add('hidden');
+        summary.innerHTML = '';
+    }
+    if (gainersMeta) {
+        gainersMeta.classList.add('hidden');
+        gainersMeta.innerHTML = '';
+    }
+    if (gainersTable) {
+        gainersTable.innerHTML = '';
+    }
     loading.classList.remove('hidden');
 
     try {
         const res = await fetch(`${API_BASE}/market-insights`);
+        if (!res.ok) throw new Error(`Insights request failed (${res.status})`);
         const data = await res.json();
 
         loading.classList.add('hidden');
@@ -1204,32 +1720,153 @@ async function fetchMarketInsights() {
             return;
         }
 
+        renderInsightsSummary(data.insights);
+
         grid.innerHTML = data.insights.map((item, idx) => `
             <div class="insight-card ${item.sentiment} animate-in" style="animation-delay: ${idx * 0.1}s">
                 <div class="insight-header">
                     <div class="insight-sectors">
-                        ${item.sectors.map(s => `<span class="sector-tag">${s}</span>`).join('')}
+                        <span class="insight-rank">#${idx + 1}</span>
+                        ${(item.sectors || []).map(s => `<span class="sector-tag">${escapeHtml(s)}</span>`).join('')}
                     </div>
-                    <span class="insight-sentiment ${item.sentiment}">${item.sentiment}</span>
+                    <span class="insight-sentiment ${item.sentiment || 'neutral'}">${escapeHtml(item.sentiment || 'neutral')}</span>
                 </div>
-                
-                <h3 class="insight-title">${item.title}</h3>
-                
+
+                <div class="insight-meta">
+                    <span>${escapeHtml(item.source || 'Market Feed')}</span>
+                    <span>•</span>
+                    <span>${escapeHtml(formatInsightTimestamp(item.publishedDate))}</span>
+                </div>
+
+                <h3 class="insight-title">${escapeHtml(item.title || 'Market Update')}</h3>
+
                 <p class="insight-description">
-                    ${item.description}
+                    ${escapeHtml(item.description || 'No summary available.')}
                 </p>
-                
+
                 <div class="insight-footer">
                     <div class="insight-stocks">
-                        ${item.stocks.map(ticker => `<span class="stock-pill" onclick="analyzeStock('${ticker}')" style="cursor:pointer">${ticker}</span>`).join('')}
+                        ${(item.stocks || []).map(ticker => `
+                            <button type="button" class="stock-pill stock-pill-btn" data-ticker="${escapeHtml(ticker)}" title="Analyze ${escapeHtml(ticker)}">
+                                ${escapeHtml(ticker)}
+                            </button>
+                        `).join('')}
                     </div>
-                    <a href="${item.url}" target="_blank" class="insight-link">Read Source →</a>
+                    <a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener" class="insight-link">Read Source →</a>
                 </div>
             </div>
         `).join('');
 
+        grid.querySelectorAll('.stock-pill-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const ticker = btn.dataset.ticker;
+                if (ticker) analyzeStock(ticker);
+            });
+        });
+
     } catch (err) {
         console.error('Failed to fetch insights:', err);
-        loading.innerHTML = `<div class="placeholder-icon">⚠️</div><h3>Intelligence Offline</h3><p>${err.message}</p>`;
+        loading.innerHTML = `<div class="placeholder-icon">⚠️</div><h3>Intelligence Offline</h3><p>${escapeHtml(err.message)}</p>`;
+    }
+}
+
+async function fetchTopGainersToday() {
+    const loading = document.getElementById('insights-loading');
+    const summary = document.getElementById('insights-summary');
+    const grid = document.getElementById('insights-grid');
+    const meta = document.getElementById('gainers-table-meta');
+    const container = document.getElementById('gainers-table-container');
+
+    if (summary) {
+        summary.classList.add('hidden');
+        summary.innerHTML = '';
+    }
+    if (grid) grid.innerHTML = '';
+    if (meta) {
+        meta.classList.add('hidden');
+        meta.innerHTML = '';
+    }
+    container.innerHTML = '';
+    loading.classList.remove('hidden');
+
+    try {
+        const res = await fetch(`${API_BASE}/top-gainers-today`);
+        if (!res.ok) throw new Error(`Top gainers request failed (${res.status})`);
+        const data = await res.json();
+        loading.classList.add('hidden');
+
+        const gainers = Array.isArray(data.gainers) ? data.gainers : [];
+        if (gainers.length === 0) {
+            container.innerHTML = '<p style="text-align:center; color:var(--text-muted); padding:16px">No gainers available right now.</p>';
+            return;
+        }
+
+        if (meta) {
+            meta.innerHTML = `
+                <div><strong>Top 10 Gainers Today</strong> (tracked universe)</div>
+                <div>As of ${escapeHtml(data.asOf || '')} • Universe: ${Number(data.universeSize || 0)}</div>
+            `;
+            meta.classList.remove('hidden');
+        }
+
+        container.innerHTML = `
+            <table class="gainers-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Symbol</th>
+                        <th>Price</th>
+                        <th>Change</th>
+                        <th>Sector</th>
+                        <th>Why It Soared Today</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${gainers.map((g) => {
+                        const pct = Number(g.changePct || 0);
+                        const abs = Number(g.changeAbs || 0);
+                        const pctClass = pct >= 0 ? 'is-positive' : 'is-negative';
+                        const title = g.reason || 'No headline reason available';
+                        const category = g.reasonCategory ? `<span class="gainer-reason-tag">${escapeHtml(g.reasonCategory)}</span>` : '';
+                        const sourceLine = [g.reasonSource, formatInsightTimestamp(g.reasonPublishedDate || '')].filter(Boolean).join(' • ');
+                        return `
+                            <tr>
+                                <td>${Number(g.rank || 0)}</td>
+                                <td>
+                                    <button type="button" class="gainer-symbol-btn" data-ticker="${escapeHtml(g.symbol || '')}">
+                                        ${escapeHtml(g.symbol || '')}
+                                    </button>
+                                    <div class="gainer-company-name">${escapeHtml(g.name || '')}</div>
+                                </td>
+                                <td>$${Number(g.currentPrice || 0).toFixed(2)}</td>
+                                <td class="${pctClass}">
+                                    +${pct.toFixed(2)}%<br>
+                                    <span class="gainer-change-abs">+$${abs.toFixed(2)}</span>
+                                </td>
+                                <td>${escapeHtml(g.sector || 'Unknown')}</td>
+                                <td>
+                                    <div class="gainer-reason-cell">
+                                        ${category}
+                                        <div class="gainer-reason-title">${escapeHtml(title)}</div>
+                                        ${sourceLine ? `<div class="gainer-reason-meta">${escapeHtml(sourceLine)}</div>` : ''}
+                                        ${g.reasonUrl ? `<a class="gainer-reason-link" href="${escapeHtml(g.reasonUrl)}" target="_blank" rel="noopener">Read source →</a>` : ''}
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        `;
+
+        container.querySelectorAll('.gainer-symbol-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const ticker = btn.dataset.ticker;
+                if (ticker) analyzeStock(ticker);
+            });
+        });
+    } catch (err) {
+        console.error('Failed to fetch top gainers:', err);
+        loading.innerHTML = `<div class="placeholder-icon">⚠️</div><h3>Top Gainers Unavailable</h3><p>${escapeHtml(err.message)}</p>`;
     }
 }

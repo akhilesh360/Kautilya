@@ -1,0 +1,72 @@
+{
+  "config": {
+    "symbols": [
+      "AAPL",
+      "MSFT",
+      "NVDA",
+      "GOOGL",
+      "AMZN",
+      "META",
+      "TSLA"
+    ],
+    "start": "2021-01-01",
+    "end": null,
+    "rebalance_days": 5,
+    "hold_days": 20,
+    "min_history": 220,
+    "cost_bps": 10.0,
+    "signal_model": "v1_price_only_technical_proxy",
+    "portfolio_model": "long_only_equal_weight_buy_signals"
+  },
+  "coverage": {
+    "calendar_start": "2020-04-16",
+    "calendar_end": "2026-02-24",
+    "rebalance_count": 259,
+    "signals_generated": 1757,
+    "evaluable_signals": 1400
+  },
+  "portfolio_metrics": {
+    "total_return_pct": 237.6,
+    "cagr_pct": 23.09,
+    "annualized_volatility_pct": 24.44,
+    "sharpe": 0.97,
+    "max_drawdown_pct": -34.11,
+    "avg_daily_return_pct": 0.0945,
+    "total_turnover_cost_pct": 6.85
+  },
+  "signal_accuracy": {
+    "overall_hit_rate_pct": 56.93,
+    "avg_forward_return_pct": 2.18,
+    "by_action": [
+      {
+        "action": "BUY",
+        "count": 638,
+        "hit_rate_pct": 60.97,
+        "avg_forward_return_pct": 2.14
+      },
+      {
+        "action": "SELL",
+        "count": 144,
+        "hit_rate_pct": 50.0,
+        "avg_forward_return_pct": 1.47
+      },
+      {
+        "action": "STRONG BUY",
+        "count": 373,
+        "hit_rate_pct": 58.98,
+        "avg_forward_return_pct": 2.38
+      },
+      {
+        "action": "STRONG SELL",
+        "count": 245,
+        "hit_rate_pct": 47.35,
+        "avg_forward_return_pct": 2.39
+      }
+    ]
+  },
+  "notes": [
+    "Point-in-time-safe proxy uses only historical prices (technical score + price-target logic).",
+    "Current v1 full-stack fundamentals/news are not backtested here to avoid look-ahead leakage.",
+    "Treat this as validation for signal behavior and threshold tuning before v2 risk gates."
+  ]
+}

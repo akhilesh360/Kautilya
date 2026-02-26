@@ -1,0 +1,9 @@
+composite_score,tech_score_min,volatility_max,require_uptrend,disable_sell_signals,rebalance_days,hold_days,total_return_pct,cagr_pct,sharpe,max_drawdown_pct,annualized_volatility_pct,overall_hit_rate_pct,avg_forward_return_pct,gated_action_counts
+53.501,55.0,0.45,False,True,5,20,176.66,18.98,1.06,-22.15,18.0,61.78,2.59,"{""BUY"": 476, ""HOLD"": 167, ""NO TRADE"": 744, ""STRONG BUY"": 370}"
+53.165,55.0,0.45,True,True,5,20,176.3,18.95,1.05,-22.15,18.12,62.0,2.63,"{""BUY"": 473, ""HOLD"": 167, ""NO TRADE"": 747, ""STRONG BUY"": 370}"
+49.748,60.0,0.45,True,True,5,20,156.56,17.46,0.99,-21.6,18.01,60.65,2.38,"{""BUY"": 429, ""NO TRADE"": 958, ""STRONG BUY"": 370}"
+49.664,60.0,0.45,False,True,5,20,156.73,17.47,0.99,-21.6,17.9,60.42,2.34,"{""BUY"": 432, ""NO TRADE"": 955, ""STRONG BUY"": 370}"
+31.253,55.0,,True,True,5,20,212.51,21.48,0.96,-37.39,23.15,60.69,2.37,"{""BUY"": 608, ""HOLD"": 178, ""NO TRADE"": 596, ""STRONG BUY"": 375}"
+31.205,55.0,,False,True,5,20,213.01,21.51,0.96,-37.39,23.05,60.51,2.34,"{""BUY"": 611, ""HOLD"": 178, ""NO TRADE"": 593, ""STRONG BUY"": 375}"
+30.426,60.0,,False,True,5,20,194.54,20.26,0.94,-36.26,22.45,59.39,2.14,"{""BUY"": 542, ""NO TRADE"": 840, ""STRONG BUY"": 375}"
+30.086,60.0,,True,True,5,20,194.33,20.24,0.93,-36.26,22.55,59.58,2.17,"{""BUY"": 539, ""NO TRADE"": 843, ""STRONG BUY"": 375}"

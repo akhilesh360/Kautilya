@@ -1,0 +1,238 @@
+{
+  "version": "v2-trained-20260225",
+  "weights_by_regime": {
+    "bull_low_vol": {
+      "fundamental": 0.28,
+      "technical": 0.3,
+      "sentiment": 0.12,
+      "valuation": 0.12,
+      "growth": 0.1,
+      "institutional": 0.08
+    },
+    "bull_high_vol": {
+      "fundamental": 0.23,
+      "technical": 0.34,
+      "sentiment": 0.16,
+      "valuation": 0.1,
+      "growth": 0.09,
+      "institutional": 0.08
+    },
+    "sideways": {
+      "fundamental": 0.25,
+      "technical": 0.28,
+      "sentiment": 0.14,
+      "valuation": 0.16,
+      "growth": 0.09,
+      "institutional": 0.08
+    },
+    "bear_high_vol": {
+      "fundamental": 0.22,
+      "technical": 0.34,
+      "sentiment": 0.18,
+      "valuation": 0.08,
+      "growth": 0.08,
+      "institutional": 0.1
+    },
+    "unknown": {
+      "fundamental": 0.3,
+      "technical": 0.25,
+      "sentiment": 0.15,
+      "valuation": 0.15,
+      "growth": 0.1,
+      "institutional": 0.05
+    }
+  },
+  "thresholds_by_regime": {
+    "bull_low_vol": {
+      "strong_buy_score": 72,
+      "strong_buy_upside": 8,
+      "buy_score": 60,
+      "buy_score_with_upside": 52,
+      "buy_upside": 12,
+      "hold_min": 45,
+      "sell_min": 35
+    },
+    "bull_high_vol": {
+      "strong_buy_score": 75,
+      "strong_buy_upside": 12,
+      "buy_score": 65,
+      "buy_score_with_upside": 55,
+      "buy_upside": 18,
+      "hold_min": 50,
+      "sell_min": 38
+    },
+    "sideways": {
+      "strong_buy_score": 74,
+      "strong_buy_upside": 12,
+      "buy_score": 62,
+      "buy_score_with_upside": 54,
+      "buy_upside": 15,
+      "hold_min": 47,
+      "sell_min": 37
+    },
+    "bear_high_vol": {
+      "strong_buy_score": 80,
+      "strong_buy_upside": 18,
+      "buy_score": 68,
+      "buy_score_with_upside": 60,
+      "buy_upside": 20,
+      "hold_min": 52,
+      "sell_min": 42
+    },
+    "unknown": {
+      "strong_buy_score": 70,
+      "strong_buy_upside": 10,
+      "buy_score": 60,
+      "buy_score_with_upside": 50,
+      "buy_upside": 15,
+      "hold_min": 45,
+      "sell_min": 35
+    }
+  },
+  "ui_mapping": {
+    "map_no_trade_to_hold": true,
+    "hold_display_label": "HOLD (Do Nothing)"
+  },
+  "runtime_filters": {
+    "tech_score_min": 55.0,
+    "volatility_max": 0.5,
+    "require_uptrend": false,
+    "disable_sell_signals": true
+  },
+  "training": {
+    "method": "walk_forward_threshold_calibration",
+    "generatedAt": "2026-02-25T20:56:06.275304Z",
+    "calibration": {
+      "selected_filters": {
+        "tech_score_min": 55.0,
+        "volatility_max": 0.5,
+        "require_uptrend": false,
+        "disable_sell_signals": true
+      },
+      "folds": [
+        {
+          "train": [
+            "2021-01-01",
+            "2023-12-31"
+          ],
+          "test": [
+            "2024-01-01",
+            "2024-12-31"
+          ],
+          "selected_config": {
+            "tech_score_min": 55.0,
+            "volatility_max": 0.5,
+            "require_uptrend": false,
+            "disable_sell_signals": true
+          },
+          "train_composite": 52.719,
+          "test_composite": 5.56,
+          "test_metrics": {
+            "total_return_pct": 27.81,
+            "cagr_pct": 4.28,
+            "annualized_volatility_pct": 12.6,
+            "sharpe": 0.4,
+            "max_drawdown_pct": -22.95,
+            "avg_daily_return_pct": 0.0198,
+            "total_turnover_cost_pct": 3.39
+          },
+          "test_signal_accuracy": {
+            "overall_hit_rate_pct": 56.32,
+            "avg_forward_return_pct": 1.43,
+            "gated_action_counts": {
+              "BUY": 213,
+              "HOLD": 99,
+              "NO TRADE": 238,
+              "STRONG BUY": 206
+            },
+            "by_action": [
+              {
+                "action": "BUY",
+                "count": 213,
+                "hit_rate_pct": 60.09,
+                "avg_forward_return_pct": 1.77
+              },
+              {
+                "action": "STRONG BUY",
+                "count": 206,
+                "hit_rate_pct": 52.43,
+                "avg_forward_return_pct": 1.08
+              }
+            ]
+          }
+        },
+        {
+          "train": [
+            "2021-01-01",
+            "2024-12-31"
+          ],
+          "test": [
+            "2025-01-01",
+            "2025-12-31"
+          ],
+          "selected_config": {
+            "tech_score_min": 55.0,
+            "volatility_max": 0.5,
+            "require_uptrend": false,
+            "disable_sell_signals": true
+          },
+          "train_composite": 52.719,
+          "test_composite": -8.728,
+          "test_metrics": {
+            "total_return_pct": 4.57,
+            "cagr_pct": 0.77,
+            "annualized_volatility_pct": 8.56,
+            "sharpe": 0.13,
+            "max_drawdown_pct": -20.63,
+            "avg_daily_return_pct": 0.0045,
+            "total_turnover_cost_pct": 2.26
+          },
+          "test_signal_accuracy": {
+            "overall_hit_rate_pct": 49.48,
+            "avg_forward_return_pct": 0.03,
+            "gated_action_counts": {
+              "BUY": 111,
+              "HOLD": 68,
+              "NO TRADE": 144,
+              "STRONG BUY": 83
+            },
+            "by_action": [
+              {
+                "action": "BUY",
+                "count": 111,
+                "hit_rate_pct": 51.35,
+                "avg_forward_return_pct": 0.08
+              },
+              {
+                "action": "STRONG BUY",
+                "count": 83,
+                "hit_rate_pct": 46.99,
+                "avg_forward_return_pct": -0.04
+              }
+            ]
+          }
+        }
+      ],
+      "ranking": [
+        {
+          "cfg": {
+            "tech_score_min": 55.0,
+            "volatility_max": 0.5,
+            "require_uptrend": false,
+            "disable_sell_signals": true
+          },
+          "avg_test_score": -1.5840000000000014,
+          "fold_scores": [
+            5.560000000000002,
+            -8.728000000000005
+          ]
+        }
+      ]
+    },
+    "notes": [
+      "Thresholds and runtime filters calibrated using price-only proxy backtests.",
+      "Regime weights remain policy defaults until sufficient paper-trade factor/outcome history exists.",
+      "Use paper-trade logs to train factor weights next."
+    ]
+  }
+}

@@ -16,6 +16,7 @@ from typing import Dict, Any, Optional, List
 import logging
 import time
 import random
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -58,16 +59,244 @@ class StockDataService:
     """Service for fetching and processing stock market data."""
 
     def __init__(self):
+        print("Initializing StockDataService internals...")
         self._result_cache = {}
+        self.fmp_api_key = (os.getenv("FMP_API_KEY") or "").strip()
+        self.fmp_base_url = "https://financialmodelingprep.com/stable"
+
+    def _has_fmp(self) -> bool:
+        return bool(self.fmp_api_key)
+
+    def _fmp_get(self, endpoint: str, params: Optional[Dict[str, Any]] = None, timeout: int = 12):
+        """Call FMP stable API, returning parsed JSON or None on failure."""
+        if not self._has_fmp():
+            return None
+        try:
+            qp = dict(params or {})
+            qp["apikey"] = self.fmp_api_key
+            url = f"{self.fmp_base_url}/{endpoint.lstrip('/')}"
+            resp = requests.get(url, params=qp, timeout=timeout)
+            if resp.status_code == 429:
+                logger.warning("FMP rate limit hit (429) for %s", endpoint)
+                return None
+            if resp.status_code in (401, 403):
+                logger.warning("FMP auth error (%s) for %s", resp.status_code, endpoint)
+                return None
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.debug(f"FMP request failed for {endpoint}: {e}")
+            return None
+
+    def _first_record(self, payload):
+        if isinstance(payload, list):
+            return payload[0] if payload else {}
+        if isinstance(payload, dict):
+            return payload
+        return {}
+
+    def _enrich_from_fmp(self, result: Dict[str, Any], symbol: str) -> None:
+        """
+        FMP primary enrichment for profile/quote/ratios/growth.
+        Uses a minimal endpoint set to preserve free-tier calls.
+        """
+        if not self._has_fmp():
+            return
+
+        # Cache FMP merged data separately to avoid repeated paid calls.
+        fmp_cache_key = f"fmp_info_{symbol}"
+        if fmp_cache_key in self._result_cache:
+            self._merge_non_empty(result, self._result_cache[fmp_cache_key])
+            return
+
+        merged: Dict[str, Any] = {}
+
+        profile = self._first_record(self._fmp_get("profile", {"symbol": symbol}))
+        quote = self._first_record(self._fmp_get("quote", {"symbol": symbol}))
+        ratios_ttm = self._first_record(self._fmp_get("ratios-ttm", {"symbol": symbol}))
+        metrics_ttm = self._first_record(self._fmp_get("key-metrics-ttm", {"symbol": symbol}))
+        growth = self._first_record(self._fmp_get("financial-growth", {"symbol": symbol, "limit": 1}))
+
+        if profile:
+            self._merge_non_empty(merged, {
+                'name': profile.get('companyName') or profile.get('name'),
+                'sector': profile.get('sector'),
+                'industry': profile.get('industry'),
+                'description': profile.get('description'),
+                'website': profile.get('website'),
+                'employees': self._safe_int(profile.get('fullTimeEmployees')),
+                'country': profile.get('country'),
+                'exchange': profile.get('exchange') or profile.get('exchangeShortName'),
+                'currency': profile.get('currency'),
+                'marketCap': self._safe_int(profile.get('marketCap')),
+                'beta': self._safe_float(profile.get('beta')),
+                'dividendYield': self._safe_float(profile.get('lastDividend')),  # proxy, may be amount not yield
+                'volume': self._safe_int(profile.get('volume')),
+                'avgVolume': self._safe_int(profile.get('averageVolume')),
+                'currentPrice': self._safe_float(profile.get('price')),
+            })
+
+        if quote:
+            self._merge_non_empty(merged, {
+                'currentPrice': self._safe_float(quote.get('price')),
+                'previousClose': self._safe_float(quote.get('previousClose')),
+                'open': self._safe_float(quote.get('open')),
+                'dayLow': self._safe_float(quote.get('dayLow')),
+                'dayHigh': self._safe_float(quote.get('dayHigh')),
+                'volume': self._safe_int(quote.get('volume')),
+                'avgVolume': self._safe_int(quote.get('avgVolume')),
+                'marketCap': self._safe_int(quote.get('marketCap')),
+                'yearLow': self._safe_float(quote.get('yearLow')),
+                'yearHigh': self._safe_float(quote.get('yearHigh')),
+                'trailingPE': self._safe_float(quote.get('pe')),
+            })
+
+        if ratios_ttm:
+            self._merge_non_empty(merged, {
+                'currentRatio': self._safe_float(ratios_ttm.get('currentRatioTTM') or ratios_ttm.get('currentRatio')),
+                'quickRatio': self._safe_float(ratios_ttm.get('quickRatioTTM') or ratios_ttm.get('quickRatio')),
+                'debtToEquity': self._safe_float(ratios_ttm.get('debtEquityRatioTTM') or ratios_ttm.get('debtEquityRatio')),
+                'priceToBook': self._safe_float(ratios_ttm.get('priceToBookRatioTTM') or ratios_ttm.get('priceToBookRatio')),
+                'profitMargins': self._safe_float(ratios_ttm.get('netProfitMarginTTM') or ratios_ttm.get('netProfitMargin')),
+                'operatingMargins': self._safe_float(ratios_ttm.get('operatingProfitMarginTTM') or ratios_ttm.get('operatingProfitMargin')),
+                'returnOnEquity': self._safe_float(ratios_ttm.get('returnOnEquityTTM') or ratios_ttm.get('returnOnEquity')),
+                'returnOnAssets': self._safe_float(ratios_ttm.get('returnOnAssetsTTM') or ratios_ttm.get('returnOnAssets')),
+                'payoutRatio': self._safe_float(ratios_ttm.get('payoutRatioTTM') or ratios_ttm.get('payoutRatio')),
+            })
+
+        if metrics_ttm:
+            self._merge_non_empty(merged, {
+                'forwardPE': self._safe_float(metrics_ttm.get('forwardPE') or metrics_ttm.get('peRatioTTM')),
+                'trailingPE': self._safe_float(metrics_ttm.get('peRatioTTM') or metrics_ttm.get('peRatio')),
+                'priceToBook': self._safe_float(metrics_ttm.get('pbRatioTTM') or metrics_ttm.get('pbRatio')),
+                'bookValue': self._safe_float(metrics_ttm.get('bookValuePerShareTTM') or metrics_ttm.get('bookValuePerShare')),
+                'enterpriseValue': self._safe_int(metrics_ttm.get('enterpriseValueTTM') or metrics_ttm.get('enterpriseValue')),
+                'freeCashflow': self._safe_float(metrics_ttm.get('freeCashFlowPerShareTTM')),  # per-share fallback if total unavailable
+            })
+
+        if growth:
+            self._merge_non_empty(merged, {
+                'revenueGrowth': self._safe_float(growth.get('revenueGrowth')),
+                'earningsGrowth': self._safe_float(growth.get('netIncomeGrowth') or growth.get('epsgrowth')),
+            })
+
+        # FMP quote/profile may use alternate 52w field names.
+        if merged.get('yearLow') is not None and not result.get('fiftyTwoWeekLow'):
+            merged['fiftyTwoWeekLow'] = merged.get('yearLow')
+        if merged.get('yearHigh') is not None and not result.get('fiftyTwoWeekHigh'):
+            merged['fiftyTwoWeekHigh'] = merged.get('yearHigh')
+
+        if merged:
+            self._result_cache[fmp_cache_key] = dict(merged)
+            self._merge_non_empty(result, merged)
+            logger.info(f"[{symbol}] Enriched company info via FMP")
+
+    def get_top_gainers_today(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Use FMP biggest-gainers endpoint when available."""
+        cache_key = f"fmp_biggest_gainers_{limit}"
+        if cache_key in self._result_cache:
+            cached = self._result_cache[cache_key]
+            if isinstance(cached, dict):
+                age = time.time() - cached.get("ts", 0)
+                if age < 600:
+                    return cached.get("data", [])
+
+        payload = self._fmp_get("biggest-gainers")
+        rows = payload if isinstance(payload, list) else []
+        result = []
+        for item in rows[: max(1, limit)]:
+            try:
+                result.append({
+                    'symbol': item.get('symbol'),
+                    'name': item.get('name') or item.get('companyName') or item.get('symbol'),
+                    'currentPrice': self._safe_float(item.get('price')),
+                    'changeAbs': self._safe_float(item.get('change')),
+                    'changePct': self._safe_float(item.get('changesPercentage') or item.get('changePercentage')),
+                    'volume': self._safe_int(item.get('volume')),
+                })
+            except Exception:
+                continue
+        self._result_cache[cache_key] = {"ts": time.time(), "data": result}
+        return result
 
     def _get_ticker(self, symbol: str) -> yf.Ticker:
         """Get a fresh yfinance Ticker (isolated for multi-threading)."""
-        return yf.Ticker(symbol, session=_get_session())
+        return yf.Ticker(symbol)
+
+    def _fresh_ticker(self, symbol: str) -> yf.Ticker:
+        """Backward-compatible alias used by company-info fetch path."""
+        return self._get_ticker(symbol)
+
+    def _merge_non_empty(self, target: Dict[str, Any], updates: Dict[str, Any]) -> None:
+        """Merge values but avoid overwriting non-empty values with missing/zero placeholders."""
+        for k, v in (updates or {}).items():
+            if v is None:
+                continue
+            if isinstance(v, str) and not v.strip():
+                continue
+
+            # For numeric fields, keep existing non-zero values unless new value is non-zero.
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                current = target.get(k)
+                if (v == 0 or (isinstance(v, float) and np.isnan(v))) and current not in (None, 0, 0.0, '', 'N/A'):
+                    continue
+            target[k] = v
+
+    def _safe_float(self, value):
+        try:
+            if value is None:
+                return None
+            if isinstance(value, str):
+                value = value.replace('%', '').replace(',', '').strip()
+                if not value:
+                    return None
+            x = float(value)
+            if np.isnan(x):
+                return None
+            return x
+        except Exception:
+            return None
+
+    def _safe_int(self, value):
+        try:
+            if value is None:
+                return None
+            x = int(float(value))
+            return x
+        except Exception:
+            return None
+
+    def _compute_fundamentals_coverage(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Coverage score for core long-term metrics. Distinguishes missing from loaded.
+        """
+        fields = [
+            'marketCap', 'beta', 'trailingPE', 'forwardPE', 'priceToBook',
+            'currentRatio', 'debtToEquity', 'profitMargins', 'operatingMargins',
+            'returnOnEquity', 'revenueGrowth', 'earningsGrowth', 'freeCashflow',
+            'bookValue', 'targetMeanPrice'
+        ]
+        loaded = 0
+        missing = []
+        for f in fields:
+            v = result.get(f)
+            is_loaded = v not in (None, '', 'N/A')
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                # Zero can be valid for some fields, but not for marketCap/ratios in this context.
+                if f in {'marketCap', 'trailingPE', 'forwardPE', 'priceToBook', 'beta', 'currentRatio', 'debtToEquity', 'returnOnEquity'} and float(v) == 0:
+                    is_loaded = False
+            if is_loaded:
+                loaded += 1
+            else:
+                missing.append(f)
+        pct = round((loaded / len(fields)) * 100, 1) if fields else 0.0
+        label = 'High' if pct >= 80 else 'Medium' if pct >= 50 else 'Low'
+        return {'score': pct, 'label': label, 'loaded': loaded, 'total': len(fields), 'missingFields': missing}
 
     def search_stock(self, query: str) -> List[Dict[str, str]]:
         """Search for stocks by name or ticker symbol."""
         try:
-            ticker = yf.Ticker(query.upper(), session=_get_session())
+            ticker = yf.Ticker(query.upper())
             # For info/search, we'll rely on the global ThreadPool timeout since yf.Ticker doesn't take timeout= directly
             info = _safe_get(lambda: ticker.info, {}, f"search {query}")
 
@@ -107,13 +336,18 @@ class StockDataService:
         # Start with a base result that always has price data
         result = self._build_base_info(symbol)
 
-        # Try to enrich with Ticker.info (may fail under rate limits)
+        # FMP primary fundamentals/profile/quote enrichment (cheap, stable) if API key exists.
+        self._enrich_from_fmp(result, symbol)
+
+        # Try to enrich with multiple Yahoo endpoints (info/get_info/fast_info) for resilience.
         try:
             ticker = self._fresh_ticker(symbol)
-            info = _safe_get(lambda: ticker.info, {}, f"info {symbol}")
+            info = _safe_get(lambda: ticker.info, {}, f"info {symbol}") or {}
+            if not info:
+                info = _safe_get(lambda: ticker.get_info(), {}, f"get_info {symbol}") or {}
 
             if info and info.get('symbol'):
-                result.update({
+                self._merge_non_empty(result, {
                     'name': info.get('longName', info.get('shortName', result['name'])),
                     'sector': info.get('sector', 'N/A'),
                     'industry': info.get('industry', 'N/A'),
@@ -165,6 +399,76 @@ class StockDataService:
                 logger.warning(f"[{symbol}] ticker.info returned empty, using price-based fallback")
         except Exception as e:
             logger.warning(f"[{symbol}] ticker.info failed ({e}), using price-based fallback")
+
+        # Additional Yahoo fallback surfaces (partial but often available when .info is degraded)
+        try:
+            ticker = self._fresh_ticker(symbol)
+            fast = _safe_get(lambda: ticker.fast_info, {}, f"fast_info {symbol}") or {}
+            self._merge_non_empty(result, {
+                'marketCap': self._safe_int(fast.get('marketCap')),
+                'beta': self._safe_float(fast.get('beta')),
+                'currentPrice': self._safe_float(fast.get('lastPrice')),
+                'previousClose': self._safe_float(fast.get('previousClose')),
+                'open': self._safe_float(fast.get('open')),
+                'dayLow': self._safe_float(fast.get('dayLow')),
+                'dayHigh': self._safe_float(fast.get('dayHigh')),
+                'fiftyTwoWeekLow': self._safe_float(fast.get('yearLow')),
+                'fiftyTwoWeekHigh': self._safe_float(fast.get('yearHigh')),
+                'volume': self._safe_int(fast.get('lastVolume')),
+                'avgVolume': self._safe_int(fast.get('tenDayAverageVolume')),
+            })
+        except Exception as e:
+            logger.debug(f"[{symbol}] fast_info enrichment failed: {e}")
+
+        # Quote/summary modules can expose key ratios even when info is sparse.
+        try:
+            quote_type = _safe_get(lambda: ticker.quote_type, {}, f"quote_type {symbol}") or {}
+            summary_detail = _safe_get(lambda: ticker.summary_detail, {}, f"summary_detail {symbol}") or {}
+            financial_data = _safe_get(lambda: ticker.financial_data, {}, f"financial_data {symbol}") or {}
+            key_stats = _safe_get(lambda: ticker.key_stats, {}, f"key_stats {symbol}") or {}
+            self._merge_non_empty(result, {
+                'name': quote_type.get('longName') or quote_type.get('shortName'),
+                'exchange': quote_type.get('exchange'),
+                'currency': quote_type.get('currency'),
+                'marketCap': summary_detail.get('marketCap') or key_stats.get('marketCap') or financial_data.get('marketCap'),
+                'beta': summary_detail.get('beta') or key_stats.get('beta'),
+                'trailingPE': summary_detail.get('trailingPE') or key_stats.get('trailingPE'),
+                'forwardPE': summary_detail.get('forwardPE') or key_stats.get('forwardPE'),
+                'dividendYield': summary_detail.get('dividendYield') or key_stats.get('dividendYield'),
+                'payoutRatio': summary_detail.get('payoutRatio'),
+                'priceToBook': key_stats.get('priceToBook'),
+                'bookValue': key_stats.get('bookValue'),
+                'profitMargins': financial_data.get('profitMargins'),
+                'operatingMargins': financial_data.get('operatingMargins'),
+                'returnOnEquity': financial_data.get('returnOnEquity'),
+                'returnOnAssets': financial_data.get('returnOnAssets'),
+                'revenueGrowth': financial_data.get('revenueGrowth'),
+                'earningsGrowth': financial_data.get('earningsGrowth'),
+                'currentRatio': financial_data.get('currentRatio'),
+                'quickRatio': financial_data.get('quickRatio'),
+                'debtToEquity': financial_data.get('debtToEquity'),
+                'freeCashflow': financial_data.get('freeCashflow'),
+                'totalCash': financial_data.get('totalCash'),
+                'totalDebt': financial_data.get('totalDebt'),
+                'targetHighPrice': financial_data.get('targetHighPrice'),
+                'targetLowPrice': financial_data.get('targetLowPrice'),
+                'targetMeanPrice': financial_data.get('targetMeanPrice'),
+                'targetMedianPrice': financial_data.get('targetMedianPrice'),
+                'numberOfAnalystOpinions': financial_data.get('numberOfAnalystOpinions'),
+                'recommendationKey': financial_data.get('recommendationKey'),
+            })
+        except Exception as e:
+            logger.debug(f"[{symbol}] module enrichment failed: {e}")
+
+        # Normalize obvious placeholders to None for long-term ratios (preserve valid zeros elsewhere).
+        for f in [
+            'marketCap', 'beta', 'trailingPE', 'forwardPE', 'priceToBook',
+            'currentRatio', 'debtToEquity', 'returnOnEquity'
+        ]:
+            if result.get(f) in (0, 0.0):
+                result[f] = None
+
+        result['fundamentalsCoverage'] = self._compute_fundamentals_coverage(result)
 
         self._result_cache[cache_key] = result
         return result
@@ -225,7 +529,7 @@ class StockDataService:
 
         # Use a single yf.download() for 1y to get current price and 52-week range
         try:
-            df = yf.download(symbol, period="1y", progress=False, auto_adjust=True, session=_get_session(), timeout=15)
+            df = yf.download(symbol, period="1y", progress=False, auto_adjust=True, timeout=15)
             if df is not None and not df.empty:
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
@@ -267,7 +571,7 @@ class StockDataService:
         # Final Fallback: ticker.history(period='1d')
         if not result.get('currentPrice'):
             try:
-                hist = ticker.history(period='1d', session=_get_session())
+                hist = ticker.history(period='1d')
                 if not hist.empty:
                     result['currentPrice'] = round(float(hist.iloc[-1]['Close']), 2)
                     logger.info(f"[{symbol}] Used ticker.history fallback for price.")
@@ -289,11 +593,11 @@ class StockDataService:
             elif period in ['3d', '5d']:
                 interval = '15m'
 
-            df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True, session=_get_session(), timeout=15)
+            df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True, timeout=15)
 
             if df is None or df.empty:
                 logger.warning(f"[{symbol}] No data for {period}, trying 2y")
-                df = yf.download(symbol, period="2y", progress=False, auto_adjust=True, session=_get_session(), timeout=15)
+                df = yf.download(symbol, period="2y", progress=False, auto_adjust=True, timeout=15)
 
             if df is None or df.empty:
                 return {'error': 'No historical data', 'symbol': symbol, 'data': []}

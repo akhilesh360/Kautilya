@@ -1,0 +1,171 @@
+{
+  "config": {
+    "symbols": [
+      "AAPL",
+      "MSFT",
+      "NVDA",
+      "GOOGL",
+      "AMZN",
+      "META",
+      "TSLA"
+    ],
+    "max_pairs": 4,
+    "horizons": [
+      30,
+      90,
+      252
+    ],
+    "min_abs_edge_score": 0.0,
+    "output": "data/backtests/filing_edge"
+  },
+  "coverage": {
+    "records": 84,
+    "symbols": [
+      "AAPL",
+      "AMZN",
+      "GOOGL",
+      "META",
+      "MSFT",
+      "NVDA",
+      "TSLA"
+    ],
+    "date_min": "2025-04-23",
+    "date_max": "2026-02-25"
+  },
+  "results": [
+    {
+      "horizon_days": 30,
+      "records": 28,
+      "records_directional": 18,
+      "directional_hit_rate_pct": 55.56,
+      "edge_score_vs_forward_return_corr": 0.0638,
+      "avg_forward_return_pct_all": 4.55,
+      "positive_signal_hit_rate_pct": 75.0,
+      "negative_signal_hit_rate_pct": 16.67,
+      "neutral_signal_avg_return_pct": 2.52,
+      "edge_buckets": [
+        {
+          "bucket": "<=-6",
+          "count": 3,
+          "avg_forward_return_pct": 3.2,
+          "pct_positive_returns": 66.67
+        },
+        {
+          "bucket": "(-6,-2]",
+          "count": 3,
+          "avg_forward_return_pct": 7.6,
+          "pct_positive_returns": 100.0
+        },
+        {
+          "bucket": "(-2,2]",
+          "count": 9,
+          "avg_forward_return_pct": 2.52,
+          "pct_positive_returns": 44.44
+        },
+        {
+          "bucket": "(2,6]",
+          "count": 6,
+          "avg_forward_return_pct": 4.3,
+          "pct_positive_returns": 83.33
+        },
+        {
+          "bucket": ">6",
+          "count": 6,
+          "avg_forward_return_pct": 7.0,
+          "pct_positive_returns": 66.67
+        }
+      ]
+    },
+    {
+      "horizon_days": 90,
+      "records": 28,
+      "records_directional": 18,
+      "directional_hit_rate_pct": 55.56,
+      "edge_score_vs_forward_return_corr": 0.208,
+      "avg_forward_return_pct_all": 10.3,
+      "positive_signal_hit_rate_pct": 75.0,
+      "negative_signal_hit_rate_pct": 16.67,
+      "neutral_signal_avg_return_pct": 3.89,
+      "edge_buckets": [
+        {
+          "bucket": "<=-6",
+          "count": 3,
+          "avg_forward_return_pct": 1.12,
+          "pct_positive_returns": 66.67
+        },
+        {
+          "bucket": "(-6,-2]",
+          "count": 3,
+          "avg_forward_return_pct": 21.61,
+          "pct_positive_returns": 100.0
+        },
+        {
+          "bucket": "(-2,2]",
+          "count": 9,
+          "avg_forward_return_pct": 3.89,
+          "pct_positive_returns": 44.44
+        },
+        {
+          "bucket": "(2,6]",
+          "count": 6,
+          "avg_forward_return_pct": 7.4,
+          "pct_positive_returns": 66.67
+        },
+        {
+          "bucket": ">6",
+          "count": 6,
+          "avg_forward_return_pct": 21.72,
+          "pct_positive_returns": 83.33
+        }
+      ]
+    },
+    {
+      "horizon_days": 252,
+      "records": 28,
+      "records_directional": 18,
+      "directional_hit_rate_pct": 55.56,
+      "edge_score_vs_forward_return_corr": 0.1682,
+      "avg_forward_return_pct_all": 11.61,
+      "positive_signal_hit_rate_pct": 75.0,
+      "negative_signal_hit_rate_pct": 16.67,
+      "neutral_signal_avg_return_pct": 1.76,
+      "edge_buckets": [
+        {
+          "bucket": "<=-6",
+          "count": 3,
+          "avg_forward_return_pct": -2.67,
+          "pct_positive_returns": 66.67
+        },
+        {
+          "bucket": "(-6,-2]",
+          "count": 3,
+          "avg_forward_return_pct": 34.93,
+          "pct_positive_returns": 100.0
+        },
+        {
+          "bucket": "(-2,2]",
+          "count": 9,
+          "avg_forward_return_pct": 1.76,
+          "pct_positive_returns": 33.33
+        },
+        {
+          "bucket": "(2,6]",
+          "count": 6,
+          "avg_forward_return_pct": 9.19,
+          "pct_positive_returns": 66.67
+        },
+        {
+          "bucket": ">6",
+          "count": 6,
+          "avg_forward_return_pct": 24.29,
+          "pct_positive_returns": 83.33
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Signal-validation backtest for Filing Edge Engine v1 (not a full portfolio strategy).",
+    "Uses recent filing pairs returned by SEC and historical prices for forward-return measurement.",
+    "SEC and filing text extraction quality may vary by issuer/form formatting."
+  ]
+}

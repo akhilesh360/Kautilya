@@ -11,10 +11,8 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.preprocessing import StandardScaler
 import logging
+from backend.services.model_policy_service import ModelPolicyService
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +34,21 @@ class AnalysisEngine:
         'institutional': 0.05,
     }
 
+    # v1.2 safety gates for a simple long-only workflow.
+    V11_POLICY = {
+        'tech_score_min': 55.0,
+        'volatility_max': 0.50,   # annualized
+        'disable_sell_signals': True,
+        'require_uptrend': False,  # tuned result was neutral/slightly better without this gate
+        'confidence_min': 55.0,
+        'data_quality_min': 70.0,
+        'block_bear_high_vol': True,
+        'block_low_fundamentals_coverage': True,
+    }
+
+    def __init__(self):
+        self.policy_service = ModelPolicyService()
+
     def run_full_analysis(
         self,
         company_info: Dict[str, Any],
@@ -46,12 +59,29 @@ class AnalysisEngine:
         insider_transactions: List[Dict],
         analyst_recs: List[Dict],
         earnings_data: Dict[str, Any],
+        sec_edge: Dict[str, Any] = None,
     ) -> Dict[str, Any]:
         """
         Run full comprehensive analysis and generate recommendations.
         """
         symbol = company_info.get('symbol', 'UNKNOWN')
         current_price = company_info.get('currentPrice', 0) or company_info.get('previousClose', 0)
+
+        # Fallback to historical closes when quote endpoints are rate-limited/unavailable.
+        if not current_price:
+            hist_points = (historical_prices or {}).get('data', []) or []
+            if hist_points:
+                try:
+                    latest = hist_points[-1] or {}
+                    prev = hist_points[-2] if len(hist_points) > 1 else latest
+                    current_price = float(latest.get('close', 0) or 0)
+                    previous_close = float(prev.get('close', 0) or current_price or 0)
+                    if current_price:
+                        company_info['currentPrice'] = current_price
+                        company_info['previousClose'] = previous_close
+                        logger.info(f"[{symbol}] Using historical close fallback for current price: {current_price}")
+                except Exception as e:
+                    logger.warning(f"[{symbol}] Historical price fallback failed: {e}")
 
         if not current_price:
             return {'error': 'Unable to determine current price for analysis'}
@@ -70,21 +100,58 @@ class AnalysisEngine:
             technical_analysis, sentiment_score, growth_score
         )
 
-        # Generate overall score (0-100)
-        overall_score = (
-            fundamental_score['score'] * self.WEIGHTS['fundamental'] +
-            technical_analysis['score'] * self.WEIGHTS['technical'] +
-            sentiment_score['score'] * self.WEIGHTS['sentiment'] +
-            valuation_score['score'] * self.WEIGHTS['valuation'] +
-            growth_score['score'] * self.WEIGHTS['growth'] +
-            institutional_score['score'] * self.WEIGHTS['institutional']
-        )
+        regime = self._detect_regime(historical_prices, technical_analysis, current_price)
+        weights = self.policy_service.get_weights(regime['name'])
 
-        # Determine recommendation
-        recommendation = self._get_recommendation(overall_score, price_targets, current_price)
+        # Generate overall score (0-100) using regime-aware dynamic weights
+        overall_score = (
+            fundamental_score['score'] * weights.get('fundamental', self.WEIGHTS['fundamental']) +
+            technical_analysis['score'] * weights.get('technical', self.WEIGHTS['technical']) +
+            sentiment_score['score'] * weights.get('sentiment', self.WEIGHTS['sentiment']) +
+            valuation_score['score'] * weights.get('valuation', self.WEIGHTS['valuation']) +
+            growth_score['score'] * weights.get('growth', self.WEIGHTS['growth']) +
+            institutional_score['score'] * weights.get('institutional', self.WEIGHTS['institutional'])
+        )
+        filing_edge_adj = self._compute_filing_edge_adjustment(sec_edge)
+        overall_score = max(0.0, min(100.0, overall_score + filing_edge_adj.get('scoreAdjustment', 0.0)))
+
+        data_quality = self._compute_data_quality(
+            company_info, financials, historical_prices, news_sentiment,
+            institutional_holders, insider_transactions, earnings_data, sec_edge
+        )
+        # Determine recommendation (raw score bands), then apply safety gates using confidence/data quality.
+        raw_recommendation = self._get_recommendation(overall_score, price_targets, current_price, regime['name'])
+        confidence = self._compute_confidence(
+            overall_score=overall_score,
+            technical=technical_analysis,
+            sentiment=sentiment_score,
+            data_quality=data_quality,
+            recommendation=raw_recommendation,
+        )
+        recommendation = self._apply_v11_policy(
+            raw_recommendation,
+            technical_analysis,
+            current_price,
+            regime_name=regime.get('name', 'unknown'),
+            confidence=confidence,
+            data_quality=data_quality,
+            company_info=company_info,
+        )
+        recommendation['confidenceScore'] = confidence['score']
+        recommendation['confidenceLabel'] = confidence['label']
+        recommendation['dataQualityScore'] = data_quality['score']
+        recommendation['filingEdgeAdjustment'] = filing_edge_adj
 
         # Compile risk factors
         risk_factors = self._assess_risks(company_info, financials, technical_analysis)
+        
+        # Add SEC Narrative Risk
+        if sec_edge and sec_edge.get('drift_alert'):
+            risk_factors.append({
+                'risk': 'SEC Narrative Shift', 
+                'impact': 'high', 
+                'detail': f"Signal detected in filing: {sec_edge.get('edge_summary', 'Significant change in filing language.')}"
+            })
 
         # Build key metrics summary
         key_metrics = self._build_key_metrics(company_info, financials)
@@ -94,7 +161,24 @@ class AnalysisEngine:
         
         # Neural Signal Fusion for conviction
         conviction_data = self._neural_signal_fusion(
-            fundamental_score, technical_analysis, sentiment_score, alpha_signals
+            fundamental_score, technical_analysis, sentiment_score, alpha_signals, sec_edge
+        )
+        long_term_quality = self._compute_long_term_quality(
+            company_info, financials, fundamental_score, valuation_score, growth_score, institutional_score
+        )
+        score_diagnostics = self._build_score_diagnostics(
+            overall_score=overall_score,
+            scores={
+                'fundamental': fundamental_score,
+                'technical': technical_analysis,
+                'sentiment': sentiment_score,
+                'valuation': valuation_score,
+                'growth': growth_score,
+                'institutional': institutional_score,
+            },
+            weights=weights,
+            data_quality=data_quality,
+            recommendation=recommendation,
         )
 
         return {
@@ -103,11 +187,22 @@ class AnalysisEngine:
             'currentPrice': current_price,
             'analysisDate': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'overallScore': round(overall_score, 1),
+            'filingEdgeAdjustment': filing_edge_adj,
+            'regime': regime,
+            'weightsUsed': weights,
             'recommendation': recommendation,
             'priceTargets': price_targets,
             'alphaSignals': alpha_signals,
+            'secEdge': sec_edge,
             'convictionScore': conviction_data['score'],
             'convictionLabel': conviction_data['label'],
+            'longTermQualityScore': long_term_quality['score'],
+            'longTermQualityLabel': long_term_quality['label'],
+            'longTermQuality': long_term_quality,
+            'confidenceScore': confidence['score'],
+            'confidenceLabel': confidence['label'],
+            'dataQuality': data_quality,
+            'scoreDiagnostics': score_diagnostics,
             'scores': {
                 'fundamental': fundamental_score,
                 'technical': technical_analysis,
@@ -120,6 +215,63 @@ class AnalysisEngine:
             'keyMetrics': key_metrics,
             'analystConsensus': self._parse_analyst_consensus(analyst_recs, company_info),
             'earningsSummary': self._parse_earnings(earnings_data),
+        }
+
+    def _compute_filing_edge_adjustment(self, sec_edge: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Small capped score adjustment from filing-edge signals.
+        Keeps SEC 10-K/10-Q drift informative without overpowering the base model.
+        """
+        if not sec_edge or sec_edge.get('error'):
+            return {
+                'enabled': False,
+                'scoreAdjustment': 0.0,
+                'reason': 'No SEC filing edge available',
+                'version': 'v1',
+            }
+
+        edge_score = float(sec_edge.get('edgeScore', 0) or 0)
+        edge_label = str(sec_edge.get('edgeLabel', '') or '')
+        signals = (sec_edge.get('filingSignals') or []) if isinstance(sec_edge, dict) else []
+
+        # Base scaled adjustment from aggregate filing edge score.
+        # Tuned asymmetrically after filing-edge v1 validation:
+        # positive filing drift had useful hit rates, negative drift was weak in the tested sample.
+        if edge_score >= 0:
+            adj = min(4.0, edge_score * 0.40)
+        else:
+            adj = max(-2.0, edge_score * 0.18)
+
+        # Extra mild penalty for explicit high-severity negative filing flags.
+        high_neg = any(
+            (s or {}).get('severity') == 'high' and (s or {}).get('type') in {'risk_rising', 'tone_cautious'}
+            for s in signals
+        )
+        high_pos = any(
+            (s or {}).get('severity') in {'high', 'medium'} and (s or {}).get('type') in {'opportunity_emerging', 'tone_improving'}
+            for s in signals
+        )
+        if high_neg:
+            adj -= 0.25
+        elif high_pos and edge_score > 0:
+            adj += 0.5
+
+        adj = max(-2.5, min(4.5, adj))
+        direction = 'neutral'
+        if adj > 0.25:
+            direction = 'positive'
+        elif adj < -0.25:
+            direction = 'negative'
+
+        return {
+            'enabled': True,
+            'scoreAdjustment': round(float(adj), 2),
+            'edgeScore': round(edge_score, 2),
+            'edgeLabel': edge_label or ('Positive filing drift' if edge_score > 0 else 'Negative filing drift' if edge_score < 0 else 'Neutral filing drift'),
+            'direction': direction,
+            'signalsUsed': min(len(signals), 8),
+            'driftAlert': bool(sec_edge.get('drift_alert')),
+            'version': 'v1',
         }
 
     def _analyze_fundamentals(self, info: Dict, financials: Dict) -> Dict[str, Any]:
@@ -603,6 +755,7 @@ class AnalysisEngine:
         vol_30d = daily_vol * np.sqrt(30)
         vol_6m = daily_vol * np.sqrt(126)
         vol_1y = daily_vol * np.sqrt(252)
+        vol_5y = daily_vol * np.sqrt(252 * 5)
 
         return {
             '30day': {
@@ -626,11 +779,19 @@ class AnalysisEngine:
                 'upside': round((target_1y - current_price) / current_price * 100, 2),
                 'confidence': self._estimate_confidence(vol_1y),
             },
+            '5year': {
+                'target': round(self._five_year_target(info, closes, current_price, analyst_targets, growth, technical), 2),
+                'low': round(max(0, self._five_year_target(info, closes, current_price, analyst_targets, growth, technical) * (1 - min(vol_5y, 1.5))), 2),
+                'high': round(self._five_year_target(info, closes, current_price, analyst_targets, growth, technical) * (1 + min(vol_5y, 1.5)), 2),
+                'upside': round((self._five_year_target(info, closes, current_price, analyst_targets, growth, technical) - current_price) / current_price * 100, 2) if current_price else 0,
+                'confidence': 'low' if len(closes) < 252 else self._estimate_confidence(max(vol_1y, 0.25)),
+            },
             'analystConsensus': analyst_targets,
         }
 
     def _linear_regression_target(self, closes: list, current_price: float) -> Dict[str, float]:
         """Project future prices using linear regression on historical data."""
+        from sklearn.linear_model import LinearRegression
         result = {}
         if len(closes) < 60:
             return {'30d': current_price, '180d': current_price, '365d': current_price}
@@ -687,32 +848,61 @@ class AnalysisEngine:
         else:
             return 'low'
 
-    def _get_recommendation(self, score: float, targets: Dict, current_price: float) -> Dict[str, Any]:
+    def _five_year_target(self, info: Dict, closes: list, current_price: float, analyst_targets: Dict[str, float], growth: Dict[str, Any], technical: Dict[str, Any]) -> float:
+        """
+        Conservative 5-year target for long-term research.
+        Blends long-run momentum, capped growth assumptions, and analyst mean reversion anchor.
+        """
+        if not current_price:
+            return 0
+
+        # Historical CAGR proxy from up to 5 years of closes
+        hist_cagr = 0.08
+        if closes and len(closes) >= 252:
+            lookback = min(len(closes) - 1, 252 * 5)
+            start_price = closes[-lookback - 1] if len(closes) > lookback else closes[0]
+            end_price = closes[-1]
+            years = max(lookback / 252.0, 1.0)
+            if start_price and start_price > 0 and end_price > 0:
+                hist_cagr = max(-0.10, min(0.25, (end_price / start_price) ** (1 / years) - 1))
+
+        # Score-based modifiers (kept conservative to avoid explosive extrapolation)
+        growth_boost = ((growth or {}).get('score', 50) - 50) / 1000  # +/- 5%
+        tech_boost = ((technical or {}).get('score', 50) - 50) / 1200
+        assumed_cagr = max(-0.05, min(0.22, hist_cagr + growth_boost + tech_boost))
+
+        compound_target = current_price * ((1 + assumed_cagr) ** 5)
+
+        analyst_mean = (analyst_targets or {}).get('mean', 0) or 0
+        analyst_anchor_5y = analyst_mean * 1.35 if analyst_mean and analyst_mean > 0 else current_price * 1.25
+
+        # Blend favors conservative compounding, with some analyst anchor
+        return float(self._blend_estimates(
+            [compound_target, analyst_anchor_5y, current_price * 1.15],
+            [0.6, 0.25, 0.15]
+        ))
+
+    def _get_recommendation(self, score: float, targets: Dict, current_price: float, regime_name: str = 'unknown') -> Dict[str, Any]:
         """Generate buy/hold/sell recommendation."""
         target_1y = targets.get('1year', {}).get('target', current_price) if targets else current_price
         upside_1y = ((target_1y - current_price) / current_price * 100) if current_price > 0 else 0
+        thresholds = self.policy_service.get_thresholds(regime_name)
 
-        # Combine score and upside potential
-        if score >= 70 and upside_1y > 10:
+        strong_buy_score = float(thresholds.get('strong_buy_score', 70))
+        buy_score = float(thresholds.get('buy_score', 60))
+        # Long-only simple score bands. Risk gates are applied later in _apply_v11_policy.
+        if score >= strong_buy_score:
             action = 'STRONG BUY'
             color = '#00c853'
-            reasoning = 'Strong fundamentals combined with significant upside potential'
-        elif score >= 60 or (score >= 50 and upside_1y > 15):
+            reasoning = 'High score suggests a strong long-term opportunity'
+        elif score >= buy_score:
             action = 'BUY'
             color = '#4caf50'
-            reasoning = 'Favorable analysis with reasonable upside potential'
-        elif score >= 45 and score < 60:
+            reasoning = 'Score is strong enough for a buy if risk conditions remain acceptable'
+        else:
             action = 'HOLD'
             color = '#ff9800'
-            reasoning = 'Mixed signals suggest holding current position'
-        elif score >= 35:
-            action = 'SELL'
-            color = '#f44336'
-            reasoning = 'Weakening fundamentals suggest reducing position'
-        else:
-            action = 'STRONG SELL'
-            color = '#b71c1c'
-            reasoning = 'Significant concerns across multiple factors'
+            reasoning = 'No clear edge yet; wait for a stronger setup'
 
         return {
             'action': action,
@@ -720,6 +910,341 @@ class AnalysisEngine:
             'score': round(score, 1),
             'reasoning': reasoning,
             'upside1Y': round(upside_1y, 2),
+            'thresholdsUsed': thresholds,
+            'regimeUsed': regime_name,
+        }
+
+    def _apply_v11_policy(
+        self,
+        recommendation: Dict[str, Any],
+        technical: Dict[str, Any],
+        current_price: float,
+        regime_name: str = 'unknown',
+        confidence: Optional[Dict[str, Any]] = None,
+        data_quality: Optional[Dict[str, Any]] = None,
+        company_info: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Apply v1.1 risk/signal-quality gates to recommendation output.
+        Converts weak or risky setups into explicit NO TRADE.
+        """
+        rec = dict(recommendation or {})
+        raw_action = rec.get('action', 'HOLD')
+        tech_score = float((technical or {}).get('score', 0) or 0)
+        indicators = (technical or {}).get('indicators', {}) or {}
+        reasons = []
+        gated = False
+        runtime_filters = (self.policy_service.load_policy() or {}).get('runtime_filters', {}) or {}
+        policy_cfg = dict(self.V11_POLICY)
+        policy_cfg.update({k: v for k, v in runtime_filters.items() if v is not None})
+
+        if tech_score < float(policy_cfg['tech_score_min']):
+            gated = True
+            reasons.append(f"technical score {tech_score:.1f} below {float(policy_cfg['tech_score_min']):.0f}")
+
+        volatility = indicators.get('volatility')
+        if volatility is not None and float(volatility) > float(policy_cfg['volatility_max']):
+            gated = True
+            reasons.append(f"annualized volatility {float(volatility)*100:.1f}% above {float(policy_cfg['volatility_max'])*100:.0f}%")
+
+        if bool(policy_cfg['require_uptrend']) and raw_action in {'BUY', 'STRONG BUY'}:
+            sma200 = indicators.get('sma200')
+            if sma200 is None or current_price <= float(sma200):
+                gated = True
+                reasons.append("price not above 200-day SMA")
+
+        if bool(policy_cfg['disable_sell_signals']) and raw_action in {'SELL', 'STRONG SELL'}:
+            gated = True
+            reasons.append("sell-side signals disabled in v1.1 (long-only policy)")
+
+        confidence_score = float((confidence or {}).get('score', 0) or 0)
+        if confidence and confidence_score < float(policy_cfg.get('confidence_min', 55.0)):
+            gated = True
+            reasons.append(f"confidence {confidence_score:.1f} below {float(policy_cfg.get('confidence_min', 55.0)):.0f}")
+
+        dq_score = float((data_quality or {}).get('score', 0) or 0)
+        if data_quality and dq_score < float(policy_cfg.get('data_quality_min', 70.0)):
+            gated = True
+            reasons.append(f"data quality {dq_score:.1f} below {float(policy_cfg.get('data_quality_min', 70.0)):.0f}")
+
+        if bool(policy_cfg.get('block_bear_high_vol', True)) and regime_name == 'bear_high_vol':
+            gated = True
+            reasons.append("bear high-volatility regime")
+
+        coverage = ((company_info or {}).get('fundamentalsCoverage') or {})
+        if bool(policy_cfg.get('block_low_fundamentals_coverage', True)) and coverage:
+            coverage_label = str(coverage.get('label', '') or '').lower()
+            if coverage_label == 'low':
+                gated = True
+                reasons.append("fundamentals coverage low")
+
+        if gated:
+            rec['rawAction'] = raw_action
+            rec['action'] = 'NO TRADE'
+            rec['color'] = '#94a3b8'
+            vol_pct = None
+            if volatility is not None:
+                vol_pct = float(volatility) * 100.0
+            confidence_txt = f"{confidence_score:.1f}" if confidence else None
+            if vol_pct and vol_pct > float(policy_cfg['volatility_max']) * 100 and confidence_txt is not None:
+                rec['reasoning'] = (
+                    f"Bullish trend may be present, but volatility is too high ({vol_pct:.1f}%) "
+                    f"and confidence is low ({confidence_txt})."
+                )
+            elif vol_pct and vol_pct > float(policy_cfg['volatility_max']) * 100:
+                rec['reasoning'] = f"Risk is too high due to very high volatility ({vol_pct:.1f}%)."
+            elif confidence_txt is not None and confidence_score < float(policy_cfg.get('confidence_min', 55.0)):
+                rec['reasoning'] = f"Signal is not strong enough yet because confidence is low ({confidence_txt})."
+            else:
+                rec['reasoning'] = "Risk or data quality gates failed, so waiting is safer."
+            rec['gated'] = True
+            rec['policyVersion'] = 'v1.2'
+            rec['policyConfig'] = policy_cfg
+            rec['policyReasons'] = reasons
+            return rec
+
+        rec['rawAction'] = raw_action
+        rec['gated'] = False
+        rec['policyVersion'] = 'v1.2'
+        rec['policyConfig'] = policy_cfg
+        rec['policyReasons'] = []
+        return rec
+
+    def _detect_regime(self, historical: Dict[str, Any], technical: Dict[str, Any], current_price: float) -> Dict[str, Any]:
+        """
+        Lightweight regime detection using price trend + annualized volatility.
+        Returns a named regime used for dynamic weighting/thresholds.
+        """
+        indicators = (technical or {}).get('indicators', {}) or {}
+        vol = indicators.get('volatility')
+        sma200 = indicators.get('sma200')
+        sma50 = indicators.get('sma50')
+        trend = 'unknown'
+
+        if sma200 and sma50 and current_price:
+            if current_price > sma200 and sma50 >= sma200:
+                trend = 'uptrend'
+            elif current_price < sma200 and sma50 <= sma200:
+                trend = 'downtrend'
+            else:
+                trend = 'sideways'
+
+        if vol is None:
+            # Fallback volatility estimate from recent closes
+            closes = [d.get('close', 0) for d in (historical or {}).get('data', []) if d.get('close')]
+            if len(closes) >= 31:
+                prices = np.array(closes[-31:], dtype=float)
+                returns = prices[1:] / prices[:-1] - 1
+                vol = float(np.std(returns) * np.sqrt(252))
+
+        vol = float(vol) if vol is not None else None
+        high_vol = (vol is not None and vol > 0.35)
+
+        if trend == 'uptrend' and not high_vol:
+            name = 'bull_low_vol'
+        elif trend == 'uptrend' and high_vol:
+            name = 'bull_high_vol'
+        elif trend == 'downtrend' and high_vol:
+            name = 'bear_high_vol'
+        elif trend == 'sideways':
+            name = 'sideways'
+        else:
+            name = 'unknown'
+
+        return {
+            'name': name,
+            'trend': trend,
+            'annualizedVolatility': round(vol, 4) if vol is not None else None,
+            'highVolatility': bool(high_vol) if vol is not None else None,
+            'sma50': sma50,
+            'sma200': sma200,
+        }
+
+    def _compute_data_quality(
+        self,
+        company_info: Dict[str, Any],
+        financials: Dict[str, Any],
+        historical_prices: Dict[str, Any],
+        news_sentiment: Dict[str, Any],
+        institutional_holders: List[Dict],
+        insider_transactions: List[Dict],
+        earnings_data: Dict[str, Any],
+        sec_edge: Dict[str, Any] = None,
+    ) -> Dict[str, Any]:
+        """Estimate completeness/freshness quality of the inputs used for analysis."""
+        score = 0
+        checks = []
+
+        hist_points = len((historical_prices or {}).get('data', []) or [])
+        if hist_points >= 200:
+            score += 25
+            checks.append({'name': 'historical_prices', 'status': 'good', 'detail': f'{hist_points} bars'})
+        elif hist_points >= 50:
+            score += 15
+            checks.append({'name': 'historical_prices', 'status': 'partial', 'detail': f'{hist_points} bars'})
+        else:
+            checks.append({'name': 'historical_prices', 'status': 'weak', 'detail': 'Insufficient history'})
+
+        quote_present = bool((company_info or {}).get('currentPrice') or (company_info or {}).get('previousClose'))
+        if quote_present:
+            score += 15
+            checks.append({'name': 'quote', 'status': 'good', 'detail': 'Current/previous close available'})
+        else:
+            checks.append({'name': 'quote', 'status': 'weak', 'detail': 'Quote missing'})
+
+        fin_quarters = len(((financials or {}).get('incomeStatement', {}) or {}).get('quarterly', []) or [])
+        if fin_quarters >= 4:
+            score += 15
+            checks.append({'name': 'financials', 'status': 'good', 'detail': f'{fin_quarters} quarterly statements'})
+        elif fin_quarters > 0:
+            score += 8
+            checks.append({'name': 'financials', 'status': 'partial', 'detail': f'{fin_quarters} quarters'})
+        else:
+            checks.append({'name': 'financials', 'status': 'weak', 'detail': 'No quarterly financials'})
+
+        news_total = (((news_sentiment or {}).get('sentiment', {}) or {}).get('totalArticles', 0) or 0)
+        if news_total >= 8:
+            score += 15
+            checks.append({'name': 'news_sentiment', 'status': 'good', 'detail': f'{news_total} articles'})
+        elif news_total > 0:
+            score += 8
+            checks.append({'name': 'news_sentiment', 'status': 'partial', 'detail': f'{news_total} articles'})
+        else:
+            checks.append({'name': 'news_sentiment', 'status': 'weak', 'detail': 'No news articles'})
+
+        inst_count = len(institutional_holders or [])
+        insider_count = len(insider_transactions or [])
+        if inst_count or insider_count:
+            score += 10
+            checks.append({'name': 'ownership_flow', 'status': 'good' if inst_count >= 3 else 'partial', 'detail': f'{inst_count} institutional / {insider_count} insider'})
+        else:
+            checks.append({'name': 'ownership_flow', 'status': 'weak', 'detail': 'No institutional/insider data'})
+
+        earnings_count = len((earnings_data or {}).get('history', []) or [])
+        if earnings_count >= 4:
+            score += 10
+            checks.append({'name': 'earnings', 'status': 'good', 'detail': f'{earnings_count} quarters'})
+        elif earnings_count > 0:
+            score += 5
+            checks.append({'name': 'earnings', 'status': 'partial', 'detail': f'{earnings_count} quarters'})
+        else:
+            checks.append({'name': 'earnings', 'status': 'weak', 'detail': 'No earnings history'})
+
+        if sec_edge and not sec_edge.get('error'):
+            score += 10
+            checks.append({'name': 'sec_edge', 'status': 'good', 'detail': 'SEC narrative comparison available'})
+        else:
+            checks.append({'name': 'sec_edge', 'status': 'partial', 'detail': 'SEC edge unavailable'})
+
+        score = max(0, min(100, score))
+        if score >= 80:
+            label = 'High'
+        elif score >= 60:
+            label = 'Medium'
+        else:
+            label = 'Low'
+        return {'score': round(score, 1), 'label': label, 'checks': checks}
+
+    def _compute_confidence(
+        self,
+        overall_score: float,
+        technical: Dict[str, Any],
+        sentiment: Dict[str, Any],
+        data_quality: Dict[str, Any],
+        recommendation: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Confidence score for taking action (separate from direction and conviction)."""
+        tech_score = float((technical or {}).get('score', 50) or 50)
+        sent_score = float((sentiment or {}).get('score', 50) or 50)
+        dq_score = float((data_quality or {}).get('score', 0) or 0)
+        rec_action = (recommendation or {}).get('action', 'HOLD')
+        indicators = (technical or {}).get('indicators', {}) or {}
+        volatility = float(indicators.get('volatility', 0) or 0)
+
+        # Base confidence driven by signal strength away from neutral + data quality.
+        signal_strength = abs(float(overall_score) - 50.0)
+        score = 30 + (signal_strength * 0.8) + (abs(tech_score - 50) * 0.2) + (dq_score * 0.35)
+
+        # Penalize noisy / uncertain conditions.
+        if volatility > 0.45:
+            score -= 15
+        elif volatility > 0.35:
+            score -= 8
+
+        if 45 <= sent_score <= 55:
+            score -= 3
+
+        if rec_action == 'NO TRADE':
+            score -= 15
+
+        score = max(0, min(100, score))
+        if score >= 75:
+            label = 'High'
+        elif score >= 55:
+            label = 'Moderate'
+        else:
+            label = 'Low'
+        return {'score': round(score, 1), 'label': label}
+
+    def _build_score_diagnostics(
+        self,
+        overall_score: float,
+        scores: Dict[str, Dict[str, Any]],
+        weights: Dict[str, float],
+        data_quality: Dict[str, Any],
+        recommendation: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Explain low scores with factor drags, missing-data penalties, and policy gating reasons.
+        """
+        factor_drags = []
+        factor_supports = []
+        for key, payload in (scores or {}).items():
+            score = float((payload or {}).get('score', 50) or 50)
+            weight = float((weights or {}).get(key, self.WEIGHTS.get(key, 0)))
+            contribution_delta = (score - 50.0) * weight
+            item = {
+                'factor': key,
+                'score': round(score, 1),
+                'weight': round(weight, 3),
+                'weightedDelta': round(contribution_delta, 2),
+                'label': (payload or {}).get('label'),
+            }
+            if contribution_delta < 0:
+                factor_drags.append(item)
+            elif contribution_delta > 0:
+                factor_supports.append(item)
+
+        factor_drags.sort(key=lambda x: x['weightedDelta'])  # most negative first
+        factor_supports.sort(key=lambda x: x['weightedDelta'], reverse=True)
+
+        missing_data_penalties = []
+        for check in (data_quality or {}).get('checks', []) or []:
+            status = check.get('status')
+            if status in {'weak', 'partial'}:
+                missing_data_penalties.append({
+                    'name': check.get('name'),
+                    'status': status,
+                    'detail': check.get('detail', ''),
+                })
+
+        low_score = overall_score < 50
+        gating_reasons = (recommendation or {}).get('policyReasons', []) or []
+        headline = "Score is healthy."
+        if low_score and factor_drags:
+            top = factor_drags[0]
+            headline = f"Main drag: {top['factor']} (weighted impact {top['weightedDelta']})."
+        elif low_score:
+            headline = "Score is below 50 due to broad weakness/uncertainty."
+
+        return {
+            'overallScore': round(float(overall_score), 1),
+            'isLowScore': bool(low_score),
+            'headline': headline,
+            'topDrags': factor_drags[:4],
+            'topSupports': factor_supports[:3],
+            'missingDataPenalties': missing_data_penalties[:6],
+            'gatingReasons': gating_reasons,
         }
 
     def _assess_risks(self, info: Dict, financials: Dict, technical: Dict) -> List[Dict[str, str]]:
@@ -776,6 +1301,61 @@ class AnalysisEngine:
             'revenueGrowth': f"{(info.get('revenueGrowth', 0) or 0)*100:.1f}%",
             'earningsGrowth': f"{(info.get('earningsGrowth', 0) or 0)*100:.1f}%",
             'freeCashFlow': self._format_large_number(info.get('freeCashflow', 0) or 0),
+        }
+
+    def _compute_long_term_quality(
+        self,
+        info: Dict[str, Any],
+        financials: Dict[str, Any],
+        fundamental_score: Dict[str, Any],
+        valuation_score: Dict[str, Any],
+        growth_score: Dict[str, Any],
+        institutional_score: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Long-term quality score: business durability + growth + balance sheet quality
+        with lower emphasis on short-term technical/sentiment timing.
+        """
+        f = float((fundamental_score or {}).get('score', 50) or 50)
+        v = float((valuation_score or {}).get('score', 50) or 50)
+        g = float((growth_score or {}).get('score', 50) or 50)
+        i = float((institutional_score or {}).get('score', 50) or 50)
+
+        bonus = 0
+        if (info.get('profitMargins', 0) or 0) > 0.15:
+            bonus += 4
+        if (info.get('returnOnEquity', 0) or 0) > 0.15:
+            bonus += 4
+        if 0 < (info.get('debtToEquity', 0) or 0) < 100:
+            bonus += 3
+        if (info.get('freeCashflow', 0) or 0) > 0:
+            bonus += 4
+
+        q_income = (((financials or {}).get('incomeStatement', {}) or {}).get('quarterly', []) or [])
+        if len(q_income) >= 4:
+            bonus += 3
+
+        score = (f * 0.40) + (g * 0.25) + (v * 0.20) + (i * 0.15) + bonus
+        score = max(0, min(100, score))
+
+        if score >= 75:
+            label = 'High Quality Compounder'
+        elif score >= 60:
+            label = 'Quality'
+        elif score >= 45:
+            label = 'Average'
+        else:
+            label = 'Speculative / Weak'
+
+        return {
+            'score': round(score, 1),
+            'label': label,
+            'method': 'long_term_quality_v1',
+            'weights': {'fundamental': 0.40, 'growth': 0.25, 'valuation': 0.20, 'institutional': 0.15},
+            'notes': [
+                'Designed for long-term research (business quality), not short-term entry timing.',
+                'Use alongside Trading View recommendation and confidence/data-quality scores.',
+            ]
         }
 
     def _parse_analyst_consensus(self, recs: List[Dict], info: Dict) -> Dict[str, Any]:
@@ -886,9 +1466,10 @@ class AnalysisEngine:
 
         return signals
 
-    def _neural_signal_fusion(self, fundamental: Dict, technical: Dict, sentiment: Dict, alpha: List) -> Dict[str, Any]:
+    def _neural_signal_fusion(self, fundamental: Dict, technical: Dict, sentiment: Dict, alpha: List, sec_edge: Dict = None) -> Dict[str, Any]:
         """
         Fuses across disparate data sources for a meta-conviction score.
+        Integrates SEC text 'edge' signals.
         """
         f_score = fundamental.get('score', 50)
         t_score = technical.get('score', 50)
@@ -901,6 +1482,24 @@ class AnalysisEngine:
             elif signal['signal'] == 'Bearish':
                 a_boost -= (signal['strength'] / 100) * 10
         
+        # Integrate SEC Edge (Text Multiplier)
+        if sec_edge:
+            # Low similarity means high drift, which is usually risky (bearish boost if risks added)
+            sim = sec_edge.get('similarity', 1.0)
+            if sim < 0.7:
+                a_boost -= 8  # High narrative shift penalty
+            elif sim > 0.95 and len(sec_edge.get('added_keywords', [])) == 0:
+                pass # Stable 
+            
+            # Keywords impact
+            pos_keywords = ['growth', 'expansion', 'ai', 'nvidia', 'efficiency', 'demand']
+            neg_keywords = ['weakness', 'decline', 'risk', 'litigation', 'competitor', 'headwind']
+            
+            added = [k.lower() for k in sec_edge.get('added_keywords', [])]
+            for word in added:
+                if any(p in word for p in pos_keywords): a_boost += 3
+                if any(n in word for n in neg_keywords): a_boost -= 3
+
         f_weight, t_weight, s_weight = 0.4, 0.4, 0.2
         base_conviction = (f_score * f_weight) + (t_score * t_weight) + (s_score * s_weight)
         final_conviction = max(0, min(100, base_conviction + a_boost))
